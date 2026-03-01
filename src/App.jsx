@@ -1,4 +1,20 @@
 import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, setDoc, onSnapshot, collection } from "firebase/firestore";
+
+/* ─────────────────────────────────────────────
+   FIREBASE CONFIG
+───────────────────────────────────────────── */
+const firebaseConfig = {
+  apiKey: "AIzaSyAQYtoQBZ4_dYI98UQoFgf4M1wis9laSMA",
+  authDomain: "freqschool.firebaseapp.com",
+  projectId: "freqschool",
+  storageBucket: "freqschool.firebasestorage.app",
+  messagingSenderId: "438288830739",
+  appId: "1:438288830739:web:2cd17a173deac64634cae6"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
 
 /* ─────────────────────────────────────────────
    EXPORTAR PDF (jsPDF + autotable via CDN)
@@ -431,21 +447,26 @@ export default function App() {
     setTimeout(() => setToast({ msg: "", type: "ok" }), 3000);
   };
 
-  /* ── Persist ── */
+  /* ── Firebase Realtime Sync ── */
   useEffect(() => {
-    try {
-      const sc = localStorage.getItem("freq_school");
-      const e  = localStorage.getItem("freq_employees");
-      const r  = localStorage.getItem("freq_records");
-      if (sc) setSchool(JSON.parse(sc));
-      if (e)  setEmployees(JSON.parse(e));
-      if (r)  setRecords(JSON.parse(r));
-    } catch {}
+    // Escola
+    const unsubSchool = onSnapshot(doc(db, "config", "school"), (snap) => {
+      if (snap.exists()) setSchool(snap.data());
+    });
+    // Funcionários
+    const unsubEmps = onSnapshot(doc(db, "config", "employees"), (snap) => {
+      if (snap.exists()) setEmployees(snap.data().list || []);
+    });
+    // Registros
+    const unsubRecs = onSnapshot(doc(db, "config", "records"), (snap) => {
+      if (snap.exists()) setRecords(snap.data().data || {});
+    });
+    return () => { unsubSchool(); unsubEmps(); unsubRecs(); };
   }, []);
 
-  const saveSchool    = (s) => { setSchool(s);    try { localStorage.setItem("freq_school",    JSON.stringify(s)); } catch {} };
-  const saveEmployees = (l) => { setEmployees(l); try { localStorage.setItem("freq_employees", JSON.stringify(l)); } catch {} };
-  const saveRecords   = (r) => { setRecords(r);   try { localStorage.setItem("freq_records",   JSON.stringify(r)); } catch {} };
+  const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          console.log("escola salva"); } catch(e) { console.error("erro escola:", e); } };
+  const saveEmployees = async (l) => { setEmployees(l); try { await setDoc(doc(db, "config", "employees"), { list: l }); console.log("funcionários salvos", l); } catch(e) { console.error("erro employees:", e); } };
+  const saveRecords   = async (r) => { setRecords(r);   try { await setDoc(doc(db, "config", "records"),   { data: r }); console.log("registros salvos"); } catch(e) { console.error("erro records:", e); } };
 
   /* ── Escola ── */
   function openSchoolModal() { setSchoolForm({ ...school }); setShowSchoolModal(true); }
