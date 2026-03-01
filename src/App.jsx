@@ -413,6 +413,16 @@ function StatusBtns({ current, onSelect, compact }) {
    APP PRINCIPAL
 ───────────────────────────────────────────── */
 export default function App() {
+  const [authed, setAuthed]         = useState(false);
+  const [loginUser, setLoginUser]   = useState("");
+  const [loginPass, setLoginPass]   = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [credentials, setCredentials]   = useState({ user: "admin", pass: "escola123" });
+  const [showChangeCreds, setShowChangeCreds] = useState(false);
+  const [newUser, setNewUser]       = useState("");
+  const [newPass, setNewPass]       = useState("");
+  const [newPass2, setNewPass2]     = useState("");
   const [tab, setTab]               = useState("registro");
   const [school, setSchool]         = useState(DEFAULT_SCHOOL);
   const [employees, setEmployees]   = useState(DEFAULT_EMPLOYEES);
@@ -461,12 +471,42 @@ export default function App() {
     const unsubRecs = onSnapshot(doc(db, "config", "records"), (snap) => {
       if (snap.exists()) setRecords(snap.data().data || {});
     });
-    return () => { unsubSchool(); unsubEmps(); unsubRecs(); };
+    // Credenciais
+    const unsubCreds = onSnapshot(doc(db, "config", "credentials"), (snap) => {
+      if (snap.exists()) setCredentials(snap.data());
+    });
+    return () => { unsubSchool(); unsubEmps(); unsubRecs(); unsubCreds(); };
   }, []);
 
-  const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          console.log("escola salva"); } catch(e) { console.error("erro escola:", e); } };
-  const saveEmployees = async (l) => { setEmployees(l); try { await setDoc(doc(db, "config", "employees"), { list: l }); console.log("funcionários salvos", l); } catch(e) { console.error("erro employees:", e); } };
-  const saveRecords   = async (r) => { setRecords(r);   try { await setDoc(doc(db, "config", "records"),   { data: r }); console.log("registros salvos"); } catch(e) { console.error("erro records:", e); } };
+  const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          } catch(e) { console.error("erro escola:", e); } };
+  const saveEmployees = async (l) => { setEmployees(l); try { await setDoc(doc(db, "config", "employees"), { list: l }); } catch(e) { console.error("erro employees:", e); } };
+  const saveRecords   = async (r) => { setRecords(r);   try { await setDoc(doc(db, "config", "records"),   { data: r }); } catch(e) { console.error("erro records:", e); } };
+  const saveCreds     = async (c) => { setCredentials(c); try { await setDoc(doc(db, "config", "credentials"), c); } catch(e) { console.error("erro creds:", e); } };
+
+  /* ── Login ── */
+  function handleLogin() {
+    setLoginLoading(true);
+    setLoginError("");
+    setTimeout(() => {
+      if (loginUser.trim() === credentials.user && loginPass === credentials.pass) {
+        setAuthed(true);
+        setLoginError("");
+      } else {
+        setLoginError("Usuário ou senha incorretos.");
+      }
+      setLoginLoading(false);
+    }, 600);
+  }
+
+  function handleChangeCreds() {
+    if (!newUser.trim()) { setLoginError("Informe o novo usuário."); return; }
+    if (newPass.length < 6) { setLoginError("A senha deve ter pelo menos 6 caracteres."); return; }
+    if (newPass !== newPass2) { setLoginError("As senhas não coincidem."); return; }
+    saveCreds({ user: newUser.trim(), pass: newPass });
+    setShowChangeCreds(false);
+    setNewUser(""); setNewPass(""); setNewPass2("");
+    showToast("Credenciais atualizadas!");
+  }
 
   /* ── Escola ── */
   function openSchoolModal() { setSchoolForm({ ...school }); setShowSchoolModal(true); }
@@ -596,6 +636,66 @@ export default function App() {
   /* ══════════════════════════════════════════
      RENDER
   ══════════════════════════════════════════ */
+  /* ── Tela de Login ── */
+  if (!authed) {
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "sans-serif" }}>
+        <div style={{ width: "100%", maxWidth: 400 }}>
+          {/* Logo */}
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            {school.logo
+              ? <img src={school.logo} alt="logo" style={{ width: 72, height: 72, borderRadius: 16, objectFit: "cover", marginBottom: 12 }} />
+              : <div style={{ width: 72, height: 72, borderRadius: 18, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 12px" }}>📋</div>
+            }
+            <div style={{ fontSize: 24, fontWeight: "bold", color: "#f1f5f9", fontFamily: "Georgia,serif" }}>{school.name || "FreqSchool"}</div>
+            <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Sistema de Frequência Escolar</div>
+          </div>
+
+          {/* Card de login */}
+          <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 25px 60px rgba(0,0,0,0.4)" }}>
+            <div style={{ fontSize: 18, fontWeight: "bold", color: "#f1f5f9", marginBottom: 6, textAlign: "center" }}>Entrar</div>
+            <div style={{ fontSize: 12, color: "#64748b", textAlign: "center", marginBottom: 24 }}>Acesso restrito à equipe escolar</div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Usuário</label>
+                <input
+                  type="text" value={loginUser} onChange={e => setLoginUser(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleLogin()}
+                  placeholder="Digite o usuário"
+                  style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Senha</label>
+                <input
+                  type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleLogin()}
+                  placeholder="Digite a senha"
+                  style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }}
+                />
+              </div>
+
+              {loginError && (
+                <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171", textAlign: "center" }}>
+                  ⚠️ {loginError}
+                </div>
+              )}
+
+              <button onClick={handleLogin} disabled={loginLoading} style={{ padding: "13px", borderRadius: 12, border: "none", cursor: loginLoading ? "not-allowed" : "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", marginTop: 4, transition: "opacity 0.2s", opacity: loginLoading ? 0.7 : 1 }}>
+                {loginLoading ? "⏳ Verificando..." : "🔐 Entrar"}
+              </button>
+            </div>
+
+            <div style={{ textAlign: "center", marginTop: 18, fontSize: 11, color: "#475569" }}>
+              Credenciais padrão: <strong style={{ color: "#64748b" }}>admin</strong> / <strong style={{ color: "#64748b" }}>escola123</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%)", fontFamily: "Georgia,serif", color: "#f1f5f9" }}>
 
@@ -624,6 +724,12 @@ export default function App() {
           </div>
           <button onClick={openSchoolModal} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#94a3b8", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             ✏️ Editar Escola
+          </button>
+          <button onClick={() => { setShowChangeCreds(true); setNewUser(credentials.user); setNewPass(""); setNewPass2(""); setLoginError(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#94a3b8", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+            🔑 Alterar Senha
+          </button>
+          <button onClick={() => { setAuthed(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+            🚪 Sair
           </button>
         </div>
       </div>
@@ -1160,6 +1266,40 @@ export default function App() {
                 <button onClick={handleFormSubmit} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", cursor: "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)" }}>
                   {editingEmp ? "💾 Salvar Alterações" : "✓ Cadastrar Funcionário"}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ MODAL ALTERAR CREDENCIAIS ══ */}
+      {showChangeCreds && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={() => setShowChangeCreds(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(5px)" }} />
+          <div style={{ position: "relative", width: "100%", maxWidth: 400, background: "#1a2640", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, padding: "28px 26px 24px", boxShadow: "0 25px 60px rgba(0,0,0,0.6)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+              <div style={{ fontSize: 17, fontWeight: "bold", color: "#f1f5f9" }}>🔑 Alterar Credenciais</div>
+              <button onClick={() => setShowChangeCreds(false)} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: "sans-serif" }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Novo Usuário</label>
+                <input type="text" value={newUser} onChange={e => setNewUser(e.target.value)} placeholder="Digite o novo usuário" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Nova Senha</label>
+                <input type="password" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="Mínimo 6 caracteres" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Confirmar Nova Senha</label>
+                <input type="password" value={newPass2} onChange={e => setNewPass2(e.target.value)} placeholder="Repita a senha" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+              </div>
+              {loginError && (
+                <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>⚠️ {loginError}</div>
+              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                <button onClick={() => setShowChangeCreds(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
+                <button onClick={handleChangeCreds} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)" }}>💾 Salvar</button>
               </div>
             </div>
           </div>
