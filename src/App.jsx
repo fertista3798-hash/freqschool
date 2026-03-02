@@ -244,23 +244,20 @@ const STATUS_ICON_DISPLAY = {
 ───────────────────────────────────────────── */
 const getTodayStr = () => new Date().toISOString().split("T")[0];
 
-function getWeekDates(offset = 0) {
+function getWeekDates() {
   const today = new Date(), day = today.getDay();
   const mon = new Date(today);
-  mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
+  mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(mon); d.setDate(mon.getDate() + i);
     return d.toISOString().split("T")[0];
   });
 }
 
-function getMonthDates(offset = 0) {
-  const t = new Date();
-  const year  = t.getFullYear();
-  const month = t.getMonth() + offset;
-  const days  = new Date(year, month + 1, 0).getDate();
+function getMonthDates() {
+  const t = new Date(), days = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
   return Array.from({ length: days }, (_, i) =>
-    new Date(year, month, i + 1).toISOString().split("T")[0]);
+    new Date(t.getFullYear(), t.getMonth(), i + 1).toISOString().split("T")[0]);
 }
 
 const formatDate      = (s) => { const [y, m, d] = s.split("-"); return `${d}/${m}/${y}`; };
@@ -505,7 +502,6 @@ export default function App() {
   const [records, setRecords]       = useState({});
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [reportType, setReportType] = useState("semanal");
-  const [reportOffset, setReportOffset] = useState(0);
   const [saved, setSaved]           = useState(false);
   const [pdfLoading, setPdfLoading]   = useState(false);
 
@@ -515,6 +511,9 @@ export default function App() {
   const [justForm, setJustForm]             = useState({ empId: "", datas: "", motivo: "", documento: "" });
   const [justError, setJustError]           = useState("");
   const [justFilter, setJustFilter]         = useState("todas");
+  const [showReprovarModal, setShowReprovarModal] = useState(false);
+  const [reprovarTarget, setReprovarTarget]       = useState(null);
+  const [reprovarMotivo, setReprovarMotivo]       = useState("");
 
   // Cadastro
   const [showForm, setShowForm]         = useState(false);
@@ -598,41 +597,78 @@ export default function App() {
   }
 
   function aprovarJustificativa(just) {
-    // Atualiza status da justificativa
     const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "aprovada" } : j);
     saveJustificativas(updated);
-    // Atualiza registros de frequência para cada data informada
     const datas = just.datas.replace(/\n/g, ",").split(",").map(d => d.trim()).filter(Boolean);
     const emp = employees.find(e => e.id === just.empId);
     let newRecords = { ...records };
     datas.forEach(dataStr => {
-      // Tenta interpretar data no formato dd/mm/yyyy ou yyyy-mm-dd
       let dateKey = "";
       if (dataStr.includes("/")) {
         const parts = dataStr.split("/");
         if (parts.length === 3) dateKey = `${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;
-      } else {
-        dateKey = dataStr;
-      }
+      } else { dateKey = dataStr; }
       if (!dateKey) return;
       if (emp && IS_APOIO(emp.role)) {
-        TURNOS.forEach(t => {
-          const k = recordKey(dateKey, just.empId, t);
-          if (newRecords[k] === "ausente") newRecords[k] = "justificado";
-        });
+        TURNOS.forEach(t => { const k = recordKey(dateKey, just.empId, t); if (newRecords[k] === "ausente") newRecords[k] = "justificado"; });
       } else {
-        const k = recordKey(dateKey, just.empId);
-        if (newRecords[k] === "ausente") newRecords[k] = "justificado";
+        const k = recordKey(dateKey, just.empId); if (newRecords[k] === "ausente") newRecords[k] = "justificado";
       }
     });
     saveRecords(newRecords);
-    showToast("Justificativa aprovada! Status atualizado.");
+    showToast("Justificativa aprovada!");
+    // Notificar via WhatsApp se tiver telefone
+    if (emp && emp.phone) {
+      const msg = [
+        `✅ *JUSTIFICATIVA APROVADA*`,
+        `🏫 *${school.name || "FreqSchool"}*`,
+        ``,
+        `👤 *${emp.name}*`,
+        `📅 Data(s): ${just.datas}`,
+        `📝 Motivo: ${just.motivo}`,
+        ``,
+        `Sua justificativa foi *aprovada* pela direção.`,
+        school.director ? `👩‍💼 Direção: ${school.director}` : "",
+      ].filter(Boolean).join("\n");
+      sendWhatsApp(emp.phone, msg);
+    }
+  }
+
+  function abrirReprovarModal(just) {
+    setReprovarTarget(just);
+    setReprovarMotivo("");
+    setShowReprovarModal(true);
+  }
+
+  function confirmarReprovacao() {
+    if (!reprovarTarget) return;
+    const updated = justificativas.map(j => j.id === reprovarTarget.id ? { ...j, status: "reprovada", motivoReprovacao: reprovarMotivo.trim() } : j);
+    saveJustificativas(updated);
+    showToast("Justificativa reprovada.");
+    // Notificar via WhatsApp se tiver telefone
+    const emp = employees.find(e => e.id === reprovarTarget.empId);
+    if (emp && emp.phone) {
+      const msg = [
+        `❌ *JUSTIFICATIVA REPROVADA*`,
+        `🏫 *${school.name || "FreqSchool"}*`,
+        ``,
+        `👤 *${emp.name}*`,
+        `📅 Data(s): ${reprovarTarget.datas}`,
+        `📝 Motivo informado: ${reprovarTarget.motivo}`,
+        ``,
+        `Sua justificativa foi *reprovada* pela direção.`,
+        reprovarMotivo.trim() ? `📋 Motivo da reprovação: ${reprovarMotivo.trim()}` : "",
+        school.director ? `👩‍💼 Direção: ${school.director}` : "",
+      ].filter(Boolean).join("\n");
+      sendWhatsApp(emp.phone, msg);
+    }
+    setShowReprovarModal(false);
+    setReprovarTarget(null);
+    setReprovarMotivo("");
   }
 
   function reprovarJustificativa(just) {
-    const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "reprovada" } : j);
-    saveJustificativas(updated);
-    showToast("Justificativa reprovada.");
+    abrirReprovarModal(just);
   }
 
   function removerJustificativa(id) {
@@ -738,10 +774,9 @@ export default function App() {
   const filledSlots     = activeOthers.filter(e => getStatus(e.id)).length
                         + activeApoio.reduce((a, e) => a + TURNOS.filter(t => getStatus(e.id, selectedDate, t)).length, 0);
 
-  const reportDates = reportType === "semanal" ? getWeekDates(reportOffset) : getMonthDates(reportOffset);
+  const reportDates = reportType === "semanal" ? getWeekDates() : getMonthDates();
   const today       = new Date();
-  const reportMonthDate = new Date(today.getFullYear(), today.getMonth() + reportOffset, 1);
-  const monthName   = reportMonthDate.toLocaleString("pt-BR", { month: "long", year: "numeric" });
+  const monthName   = today.toLocaleString("pt-BR", { month: "long", year: "numeric" });
   const filteredCad = employees.filter(e =>
     e.name.toLowerCase().includes(searchCad.toLowerCase()) ||
     e.role.toLowerCase().includes(searchCad.toLowerCase()));
@@ -771,7 +806,7 @@ export default function App() {
     { id: "registro",       label: "📝 Registro" },
     { id: "relatorio",      label: "📊 Relatório" },
     { id: "cadastro",       label: "👥 Cadastro" },
-    { id: "justificativas", label: "📋 Justificativas" },
+    { id: "justificativas", label: "📋 Justificativas", badge: justificativas.filter(j => j.status === "pendente").length },
     { id: "escola",         label: "🏫 Escola" },
   ];
 
@@ -911,7 +946,12 @@ export default function App() {
       <div style={{ padding: "20px 28px 0" }}>
         <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 12, padding: 4, width: "fit-content", flexWrap: "wrap" }}>
           {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "9px 20px", borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: tab === t.id ? "linear-gradient(135deg,#6366f1,#8b5cf6)" : "transparent", color: tab === t.id ? "#fff" : "#94a3b8", boxShadow: tab === t.id ? "0 4px 15px rgba(99,102,241,0.4)" : "none" }}>{t.label}</button>
+            <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "9px 20px", borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: tab === t.id ? "linear-gradient(135deg,#6366f1,#8b5cf6)" : "transparent", color: tab === t.id ? "#fff" : "#94a3b8", boxShadow: tab === t.id ? "0 4px 15px rgba(99,102,241,0.4)" : "none", position: "relative", display: "flex", alignItems: "center", gap: 6 }}>
+              {t.label}
+              {t.badge > 0 && (
+                <span style={{ background: "#ef4444", color: "#fff", borderRadius: 10, fontSize: 10, fontWeight: 900, padding: "1px 6px", lineHeight: "16px", minWidth: 16, textAlign: "center" }}>{t.badge}</span>
+              )}
+            </button>
           ))}
         </div>
       </div>
@@ -1036,30 +1076,16 @@ export default function App() {
           </div>
         )}
 
+        {/* ══════════ RELATÓRIO ══════════ */}
         {tab === "relatorio" && (
           <div>
             <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
-              {/* Seletor semanal/mensal */}
               <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 4 }}>
                 {["semanal", "mensal"].map(r => (
-                  <button key={r} onClick={() => { setReportType(r); setReportOffset(0); }} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: reportType === r ? "#6366f1" : "transparent", color: reportType === r ? "#fff" : "#94a3b8" }}>{r === "semanal" ? "📅 Semanal" : "🗓️ Mensal"}</button>
+                  <button key={r} onClick={() => setReportType(r)} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: reportType === r ? "#6366f1" : "transparent", color: reportType === r ? "#fff" : "#94a3b8" }}>{r === "semanal" ? "📅 Semanal" : "🗓️ Mensal"}</button>
                 ))}
               </div>
-
-              {/* Navegação de período */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "4px 6px" }}>
-                <button onClick={() => setReportOffset(o => o - 1)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(255,255,255,0.07)", color: "#a5b4fc", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
-                <span style={{ fontFamily: "sans-serif", fontSize: 13, color: reportOffset === 0 ? "#a5b4fc" : "#f1f5f9", fontWeight: 600, minWidth: 130, textAlign: "center" }}>
-                  {reportType === "semanal"
-                    ? reportOffset === 0 ? "Esta semana"
-                      : reportOffset === -1 ? "Semana passada"
-                      : `${Math.abs(reportOffset)} sem. atrás`
-                    : reportOffset === 0 ? "Este mês" : monthName.charAt(0).toUpperCase() + monthName.slice(1)}
-                </span>
-                <button onClick={() => setReportOffset(o => Math.min(o + 1, 0))} disabled={reportOffset === 0} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: reportOffset === 0 ? "not-allowed" : "pointer", background: reportOffset === 0 ? "transparent" : "rgba(255,255,255,0.07)", color: reportOffset === 0 ? "#334155" : "#a5b4fc", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
-              </div>
-
-              {/* Botões exportar */}
+              <span style={{ fontFamily: "sans-serif", fontSize: 13, color: "#94a3b8" }}>{reportType === "semanal" ? "Semana atual" : monthName}</span>
               <button
                 onClick={async () => {
                   setPdfLoading(true);
@@ -1079,46 +1105,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Alerta frequência baixa */}
-            {(() => {
-              const emAlerta = activeEmployees.filter(emp => {
-                const sm = getEmpSummary(emp);
-                if (IS_APOIO(emp.role)) {
-                  return TURNOS.some(t => sm[t].pct !== null && sm[t].pct < 75);
-                }
-                return sm.geral.pct !== null && sm.geral.pct < 75;
-              });
-              if (emAlerta.length === 0) return null;
-              return (
-                <div style={{ marginBottom: 18, borderRadius: 14, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", padding: "14px 18px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontFamily: "sans-serif" }}>
-                    <span style={{ fontSize: 18 }}>⚠️</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5" }}>
-                      {emAlerta.length} funcionário{emAlerta.length > 1 ? "s" : ""} com frequência abaixo de 75%
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {emAlerta.map(emp => {
-                      const sm = getEmpSummary(emp);
-                      const apoio = IS_APOIO(emp.role);
-                      const pct = apoio
-                        ? Math.min(...TURNOS.map(t => sm[t].pct ?? 100))
-                        : sm.geral.pct;
-                      return (
-                        <div key={emp.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 10, padding: "7px 12px" }}>
-                          <div style={{ width: 28, height: 28, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
-                          <div>
-                            <div style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 600, color: "#f1f5f9" }}>{emp.name.split(" ")[0]}</div>
-                            <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 900, color: "#ef4444" }}>{pct}% presença</div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 22 }}>
               {Object.entries(STATUS_CONFIG).map(([k, v]) => {
                 const total = reportDates.reduce((acc, d) => {
@@ -1132,24 +1118,20 @@ export default function App() {
 
             <div style={{ ...card, overflow: "hidden", marginBottom: 22 }}>
               <div style={{ padding: "12px 18px", background: "rgba(99,102,241,0.1)", borderBottom: "1px solid rgba(255,255,255,0.07)", fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: "#a5b4fc", letterSpacing: 1, textTransform: "uppercase" }}>
-                Resumo por Funcionário — {reportType === "semanal" ? (reportOffset === 0 ? "Esta Semana" : reportOffset === -1 ? "Semana Passada" : `${Math.abs(reportOffset)} Semanas Atrás`) : monthName.charAt(0).toUpperCase() + monthName.slice(1)}
+                Resumo por Funcionário — {reportType === "semanal" ? "Esta Semana" : monthName}
               </div>
               {activeEmployees.length === 0 ? (
                 <div style={{ padding: "30px", textAlign: "center", color: "#475569", fontFamily: "sans-serif", fontSize: 13 }}>Nenhum funcionário ativo.</div>
               ) : activeEmployees.map((emp, i) => {
                 const sm = getEmpSummary(emp), apoio = IS_APOIO(emp.role);
-                const baixaFreq = apoio
-                  ? TURNOS.some(t => sm[t].pct !== null && sm[t].pct < 75)
-                  : sm.geral.pct !== null && sm.geral.pct < 75;
                 return (
-                  <div key={emp.id} style={{ padding: "13px 18px", borderBottom: i < activeEmployees.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none", background: baixaFreq ? "rgba(239,68,68,0.04)" : "transparent", borderLeft: baixaFreq ? "3px solid #ef4444" : "3px solid transparent", transition: "all 0.2s" }}>
+                  <div key={emp.id} style={{ padding: "13px 18px", borderBottom: i < activeEmployees.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                       <div style={{ width: 34, height: 34, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
                       <div style={{ flex: 1, minWidth: 120 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                           {emp.name}
                           {apoio && <span style={{ fontFamily: "sans-serif", fontSize: 10, background: "rgba(99,102,241,0.2)", color: "#a5b4fc", borderRadius: 5, padding: "1px 6px" }}>Apoio</span>}
-                          {baixaFreq && <span style={{ fontFamily: "sans-serif", fontSize: 10, background: "rgba(239,68,68,0.2)", color: "#f87171", borderRadius: 5, padding: "1px 6px" }}>⚠️ Freq. baixa</span>}
                         </div>
                         <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "sans-serif" }}>{emp.role}</div>
                       </div>
@@ -1280,7 +1262,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ══════════ JUSTIFICATIVAS ══════════ */}
         {tab === "justificativas" && (
           <div>
             {/* Header */}
@@ -1293,6 +1274,42 @@ export default function App() {
                 + Nova Justificativa
               </button>
             </div>
+
+            {/* Painel faltas sem justificativa */}
+            {(() => {
+              const semJust = activeEmployees.filter(emp => {
+                const temFalta = Object.entries(records).some(([k, v]) => {
+                  if (v !== "ausente") return false;
+                  if (IS_APOIO(emp.role)) return TURNOS.some(t => k === `${k.split("_")[0]}_${emp.id}_${t}`) && k.includes(`_${emp.id}_`);
+                  return k.endsWith(`_${emp.id}`) && !k.includes(`_${emp.id}_`);
+                });
+                if (!temFalta) return false;
+                return !justificativas.some(j => j.empId === emp.id && (j.status === "pendente" || j.status === "aprovada"));
+              });
+              if (semJust.length === 0) return null;
+              return (
+                <div style={{ marginBottom: 20, borderRadius: 14, background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.3)", padding: "14px 18px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <span style={{ fontSize: 18 }}>⚠️</span>
+                    <span style={{ fontFamily: "sans-serif", fontSize: 13, fontWeight: 700, color: "#fcd34d" }}>
+                      {semJust.length} funcionário{semJust.length > 1 ? "s" : ""} com falta{semJust.length > 1 ? "s" : ""} sem justificativa
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {semJust.map(emp => (
+                      <div key={emp.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "7px 12px" }}>
+                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: "bold" }}>{getInitials(emp.name)}</div>
+                        <div>
+                          <div style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 600, color: "#f1f5f9" }}>{emp.name.split(" ")[0]}</div>
+                          <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#f59e0b" }}>Sem justificativa</div>
+                        </div>
+                        <button onClick={() => { setJustForm({ empId: String(emp.id), datas: "", motivo: "", documento: "" }); setJustError(""); setShowJustModal(true); }} style={{ padding: "4px 10px", borderRadius: 7, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.25)", color: "#f59e0b", fontSize: 11, fontWeight: 700, fontFamily: "sans-serif" }}>+ Justificar</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Filtros */}
             <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20, flexWrap: "wrap" }}>
@@ -1328,11 +1345,9 @@ export default function App() {
                     return (
                       <div key={just.id} style={{ background: statusCfg.bg, border: `1px solid ${statusCfg.border}`, borderRadius: 16, padding: "18px 20px", transition: "all 0.2s" }}>
                         <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
-                          {/* Avatar */}
                           <div style={{ width: 44, height: 44, borderRadius: "50%", background: emp ? avatarColor(emp.id) : "#334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: "bold", flexShrink: 0 }}>
                             {emp ? getInitials(emp.name) : "?"}
                           </div>
-                          {/* Info */}
                           <div style={{ flex: 1, minWidth: 200 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
                               <span style={{ fontSize: 15, fontWeight: 700 }}>{emp ? emp.name : "Funcionário removido"}</span>
@@ -1348,14 +1363,17 @@ export default function App() {
                                 <span style={{ color: "#64748b", fontWeight: 600 }}>📎 Doc:</span>
                                 <a href={just.documento} target="_blank" rel="noreferrer" style={{ color: "#a5b4fc", fontSize: 12 }}>Ver documento</a>
                               </>)}
+                              {just.motivoReprovacao && (<>
+                                <span style={{ color: "#f87171", fontWeight: 600 }}>❌ Reprovado:</span>
+                                <span style={{ color: "#fca5a5" }}>{just.motivoReprovacao}</span>
+                              </>)}
                             </div>
                             <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#475569", marginTop: 8 }}>Registrado em: {dataRegistro}</div>
                           </div>
-                          {/* Ações */}
                           <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
                             {just.status === "pendente" && (<>
-                              <button onClick={() => aprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>✅ Aprovar</button>
-                              <button onClick={() => reprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#ef4444", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>❌ Reprovar</button>
+                              <button onClick={() => aprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>✅ Aprovar{emp?.phone ? " + 📲" : ""}</button>
+                              <button onClick={() => reprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#ef4444", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>❌ Reprovar{emp?.phone ? " + 📲" : ""}</button>
                             </>)}
                             {just.status !== "pendente" && (
                               <button onClick={() => { const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "pendente" } : j); saveJustificativas(updated); showToast("Reaberta para análise."); }} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>↩ Reabrir</button>
@@ -1379,7 +1397,6 @@ export default function App() {
                     <button onClick={() => setShowJustModal(false)} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}>×</button>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: "sans-serif" }}>
-                    {/* Funcionário */}
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Funcionário *</label>
                       <select value={justForm.empId} onChange={e => setJustForm(f => ({ ...f, empId: e.target.value }))} style={{ width: "100%", background: "#1e293b", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: justForm.empId ? "#f1f5f9" : "#64748b", fontSize: 14, outline: "none", cursor: "pointer" }}>
@@ -1387,18 +1404,15 @@ export default function App() {
                         {employees.filter(e => e.active).map(e => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}
                       </select>
                     </div>
-                    {/* Datas */}
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Data(s) da Ausência *</label>
                       <input type="text" value={justForm.datas} onChange={e => setJustForm(f => ({ ...f, datas: e.target.value }))} placeholder="Ex: 28/02/2026 ou 28/02, 01/03/2026" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
                       <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Para múltiplas datas, separe por vírgula</div>
                     </div>
-                    {/* Motivo */}
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Motivo da Ausência *</label>
                       <textarea value={justForm.motivo} onChange={e => setJustForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Descreva o motivo da ausência..." rows={3} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", resize: "vertical", fontFamily: "sans-serif" }} />
                     </div>
-                    {/* Documento */}
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Link do Documento (opcional)</label>
                       <input type="url" value={justForm.documento} onChange={e => setJustForm(f => ({ ...f, documento: e.target.value }))} placeholder="Cole o link do documento aqui" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
@@ -1409,6 +1423,45 @@ export default function App() {
                       <button onClick={() => setShowJustModal(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
                       <button onClick={handleAddJustificativa} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)" }}>✓ Registrar Justificativa</button>
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Reprovar com motivo */}
+            {showReprovarModal && reprovarTarget && (
+              <div style={{ position: "fixed", inset: 0, zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                <div onClick={() => setShowReprovarModal(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(5px)" }} />
+                <div style={{ position: "relative", width: "100%", maxWidth: 420, background: "#1a2640", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 20, padding: "26px 24px", boxShadow: "0 25px 60px rgba(0,0,0,0.6)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+                    <div style={{ fontSize: 16, fontWeight: "bold", color: "#f87171" }}>❌ Reprovar Justificativa</div>
+                    <button onClick={() => setShowReprovarModal(false)} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}>×</button>
+                  </div>
+                  {(() => {
+                    const emp = employees.find(e => e.id === reprovarTarget.empId);
+                    return emp ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, padding: "10px 14px", background: "rgba(255,255,255,0.04)", borderRadius: 10 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: "bold" }}>{getInitials(emp.name)}</div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{emp.name}</div>
+                          <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8" }}>📅 {reprovarTarget.datas}</div>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+                  <div style={{ fontFamily: "sans-serif", marginBottom: 16 }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Motivo da Reprovação (opcional)</label>
+                    <textarea value={reprovarMotivo} onChange={e => setReprovarMotivo(e.target.value)} placeholder="Ex: documento inválido, prazo expirado..." rows={3} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "sans-serif" }} />
+                    {employees.find(e => e.id === reprovarTarget.empId)?.phone && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8", display: "flex", alignItems: "center", gap: 6 }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="#25d366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                        O funcionário será notificado via WhatsApp automaticamente
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button onClick={() => setShowReprovarModal(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, fontFamily: "sans-serif", cursor: "pointer" }}>Cancelar</button>
+                    <button onClick={confirmarReprovacao} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#ef4444,#dc2626)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", cursor: "pointer", boxShadow: "0 4px 15px rgba(239,68,68,0.4)" }}>❌ Confirmar Reprovação</button>
                   </div>
                 </div>
               </div>
