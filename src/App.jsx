@@ -432,6 +432,13 @@ export default function App() {
   const [saved, setSaved]           = useState(false);
   const [pdfLoading, setPdfLoading]   = useState(false);
 
+  // Justificativas
+  const [justificativas, setJustificativas] = useState([]);
+  const [showJustModal, setShowJustModal]   = useState(false);
+  const [justForm, setJustForm]             = useState({ empId: "", datas: "", motivo: "", documento: "" });
+  const [justError, setJustError]           = useState("");
+  const [justFilter, setJustFilter]         = useState("todas");
+
   // Cadastro
   const [showForm, setShowForm]         = useState(false);
   const [editingEmp, setEditingEmp]     = useState(null);
@@ -475,13 +482,86 @@ export default function App() {
     const unsubCreds = onSnapshot(doc(db, "config", "credentials"), (snap) => {
       if (snap.exists()) setCredentials(snap.data());
     });
-    return () => { unsubSchool(); unsubEmps(); unsubRecs(); unsubCreds(); };
+    // Justificativas
+    const unsubJust = onSnapshot(doc(db, "config", "justificativas"), (snap) => {
+      if (snap.exists()) setJustificativas(snap.data().list || []);
+    });
+    return () => { unsubSchool(); unsubEmps(); unsubRecs(); unsubCreds(); unsubJust(); };
   }, []);
 
   const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          } catch(e) { console.error("erro escola:", e); } };
   const saveEmployees = async (l) => { setEmployees(l); try { await setDoc(doc(db, "config", "employees"), { list: l }); } catch(e) { console.error("erro employees:", e); } };
   const saveRecords   = async (r) => { setRecords(r);   try { await setDoc(doc(db, "config", "records"),   { data: r }); } catch(e) { console.error("erro records:", e); } };
   const saveCreds     = async (c) => { setCredentials(c); try { await setDoc(doc(db, "config", "credentials"), c); } catch(e) { console.error("erro creds:", e); } };
+
+  const saveJustificativas = async (list) => {
+    setJustificativas(list);
+    try { await setDoc(doc(db, "config", "justificativas"), { list }); } catch(e) { console.error("erro just:", e); }
+  };
+
+  /* ── Justificativas ── */
+  function handleAddJustificativa() {
+    if (!justForm.empId) { setJustError("Selecione o funcionário."); return; }
+    if (!justForm.datas.trim()) { setJustError("Informe a(s) data(s)."); return; }
+    if (!justForm.motivo.trim()) { setJustError("Informe o motivo."); return; }
+    setJustError("");
+    const nova = {
+      id: Date.now(),
+      empId: Number(justForm.empId),
+      datas: justForm.datas.trim(),
+      motivo: justForm.motivo.trim(),
+      documento: justForm.documento || "",
+      status: "pendente",
+      criadoEm: new Date().toISOString(),
+    };
+    saveJustificativas([...justificativas, nova]);
+    setJustForm({ empId: "", datas: "", motivo: "", documento: "" });
+    setShowJustModal(false);
+    showToast("Justificativa registrada!");
+  }
+
+  function aprovarJustificativa(just) {
+    // Atualiza status da justificativa
+    const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "aprovada" } : j);
+    saveJustificativas(updated);
+    // Atualiza registros de frequência para cada data informada
+    const datas = just.datas.replace(/\n/g, ",").split(",").map(d => d.trim()).filter(Boolean);
+    const emp = employees.find(e => e.id === just.empId);
+    let newRecords = { ...records };
+    datas.forEach(dataStr => {
+      // Tenta interpretar data no formato dd/mm/yyyy ou yyyy-mm-dd
+      let dateKey = "";
+      if (dataStr.includes("/")) {
+        const parts = dataStr.split("/");
+        if (parts.length === 3) dateKey = `${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;
+      } else {
+        dateKey = dataStr;
+      }
+      if (!dateKey) return;
+      if (emp && IS_APOIO(emp.role)) {
+        TURNOS.forEach(t => {
+          const k = recordKey(dateKey, just.empId, t);
+          if (newRecords[k] === "ausente") newRecords[k] = "justificado";
+        });
+      } else {
+        const k = recordKey(dateKey, just.empId);
+        if (newRecords[k] === "ausente") newRecords[k] = "justificado";
+      }
+    });
+    saveRecords(newRecords);
+    showToast("Justificativa aprovada! Status atualizado.");
+  }
+
+  function reprovarJustificativa(just) {
+    const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "reprovada" } : j);
+    saveJustificativas(updated);
+    showToast("Justificativa reprovada.");
+  }
+
+  function removerJustificativa(id) {
+    saveJustificativas(justificativas.filter(j => j.id !== id));
+    showToast("Justificativa removida.");
+  }
 
   /* ── Login ── */
   function handleLogin() {
@@ -609,10 +689,11 @@ export default function App() {
   /* ── Styles ── */
   const card = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16 };
   const TABS = [
-    { id: "registro",  label: "📝 Registro" },
-    { id: "relatorio", label: "📊 Relatório" },
-    { id: "cadastro",  label: "👥 Cadastro" },
-    { id: "escola",    label: "🏫 Escola" },
+    { id: "registro",       label: "📝 Registro" },
+    { id: "relatorio",      label: "📊 Relatório" },
+    { id: "cadastro",       label: "👥 Cadastro" },
+    { id: "justificativas", label: "📋 Justificativas" },
+    { id: "escola",         label: "🏫 Escola" },
   ];
 
   /* ── WhatsApp send btn ── */
@@ -638,57 +719,141 @@ export default function App() {
   ══════════════════════════════════════════ */
   /* ── Tela de Login ── */
   if (!authed) {
+    // Página pública: login + formulário de justificativa
     return (
-      <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "sans-serif" }}>
-        <div style={{ width: "100%", maxWidth: 400 }}>
-          {/* Logo */}
-          <div style={{ textAlign: "center", marginBottom: 32 }}>
-            {school.logo
-              ? <img src={school.logo} alt="logo" style={{ width: 72, height: 72, borderRadius: 16, objectFit: "cover", marginBottom: 12 }} />
-              : <div style={{ width: 72, height: 72, borderRadius: 18, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 12px" }}>📋</div>
-            }
-            <div style={{ fontSize: 24, fontWeight: "bold", color: "#f1f5f9", fontFamily: "Georgia,serif" }}>{school.name || "FreqSchool"}</div>
-            <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Sistema de Frequência Escolar</div>
+      <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%)", fontFamily: "sans-serif", color: "#f1f5f9" }}>
+
+        {/* Toast público */}
+        {toast.msg && (
+          <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: toast.type === "err" ? "#ef4444" : "#22c55e", color: "#fff", borderRadius: 12, padding: "12px 22px", fontSize: 14, fontWeight: 600, boxShadow: "0 8px 30px rgba(0,0,0,0.3)" }}>
+            {toast.type === "err" ? "✗" : "✓"} {toast.msg}
           </div>
+        )}
 
-          {/* Card de login */}
-          <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 25px 60px rgba(0,0,0,0.4)" }}>
-            <div style={{ fontSize: 18, fontWeight: "bold", color: "#f1f5f9", marginBottom: 6, textAlign: "center" }}>Entrar</div>
-            <div style={{ fontSize: 12, color: "#64748b", textAlign: "center", marginBottom: 24 }}>Acesso restrito à equipe escolar</div>
+        {/* Header público */}
+        <div style={{ background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.08)", padding: "16px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {school.logo
+              ? <img src={school.logo} alt="logo" style={{ width: 42, height: 42, borderRadius: 10, objectFit: "cover" }} />
+              : <div style={{ width: 42, height: 42, borderRadius: 12, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>📋</div>
+            }
+            <div>
+              <div style={{ fontSize: 18, fontWeight: "bold", letterSpacing: 1, fontFamily: "Georgia,serif" }}>{school.name || "FreqSchool"}</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>{school.city || "Sistema de Frequência Escolar"}</div>
+            </div>
+          </div>
+          <button onClick={() => setAuthed("login")} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.4)", background: "rgba(99,102,241,0.1)", color: "#a5b4fc", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+            🔐 Acesso do Gestor
+          </button>
+        </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Usuário</label>
-                <input
-                  type="text" value={loginUser} onChange={e => setLoginUser(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleLogin()}
-                  placeholder="Digite o usuário"
-                  style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }}
-                />
+        <div style={{ padding: "32px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
+
+          {/* Se clicou em "Acesso do Gestor", mostra o form de login */}
+          {authed === "login" && (
+            <div style={{ width: "100%", maxWidth: 420, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, padding: "28px 26px", boxShadow: "0 25px 60px rgba(0,0,0,0.4)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                <div style={{ fontSize: 17, fontWeight: "bold" }}>🔐 Login do Gestor</div>
+                <button onClick={() => setAuthed(false)} style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 16 }}>×</button>
               </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Senha</label>
-                <input
-                  type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleLogin()}
-                  placeholder="Digite a senha"
-                  style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }}
-                />
-              </div>
-
-              {loginError && (
-                <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171", textAlign: "center" }}>
-                  ⚠️ {loginError}
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Usuário</label>
+                  <input type="text" value={loginUser} onChange={e => setLoginUser(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="Digite o usuário" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
                 </div>
-              )}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Senha</label>
+                  <input type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="Digite a senha" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                </div>
+                {loginError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171", textAlign: "center" }}>⚠️ {loginError}</div>}
+                <button onClick={handleLogin} disabled={loginLoading} style={{ padding: "13px", borderRadius: 12, border: "none", cursor: loginLoading ? "not-allowed" : "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", opacity: loginLoading ? 0.7 : 1 }}>
+                  {loginLoading ? "⏳ Verificando..." : "🔐 Entrar"}
+                </button>
+              </div>
+            </div>
+          )}
 
-              <button onClick={handleLogin} disabled={loginLoading} style={{ padding: "13px", borderRadius: 12, border: "none", cursor: loginLoading ? "not-allowed" : "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", marginTop: 4, transition: "opacity 0.2s", opacity: loginLoading ? 0.7 : 1 }}>
-                {loginLoading ? "⏳ Verificando..." : "🔐 Entrar"}
-              </button>
+          {/* Formulário público de justificativa */}
+          <div style={{ width: "100%", maxWidth: 560 }}>
+            <div style={{ textAlign: "center", marginBottom: 28 }}>
+              <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+              <div style={{ fontSize: 22, fontWeight: "bold", fontFamily: "Georgia,serif", marginBottom: 6 }}>Formulário de Justificativa</div>
+              <div style={{ fontSize: 13, color: "#64748b" }}>Preencha os campos abaixo para justificar sua ausência</div>
             </div>
 
-            <div style={{ textAlign: "center", marginTop: 18, fontSize: 11, color: "#475569" }}>
-              Credenciais padrão: <strong style={{ color: "#64748b" }}>admin</strong> / <strong style={{ color: "#64748b" }}>escola123</strong>
+            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "28px 26px", boxShadow: "0 15px 40px rgba(0,0,0,0.3)" }}>
+              {(() => {
+                const [pubForm, setPubForm] = useState({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
+                const [pubError, setPubError] = useState("");
+                const [pubSent, setPubSent] = useState(false);
+
+                function handlePublicSubmit() {
+                  if (!pubForm.nome.trim()) { setPubError("Informe seu nome completo."); return; }
+                  if (!pubForm.cargo.trim()) { setPubError("Informe seu cargo."); return; }
+                  if (!pubForm.datas.trim()) { setPubError("Informe a(s) data(s) de ausência."); return; }
+                  if (!pubForm.motivo.trim()) { setPubError("Informe o motivo."); return; }
+                  setPubError("");
+
+                  // Tenta encontrar o funcionário pelo nome
+                  const empMatch = employees.find(e => e.name.toLowerCase().includes(pubForm.nome.trim().toLowerCase()));
+
+                  const nova = {
+                    id: Date.now(),
+                    empId: empMatch ? empMatch.id : null,
+                    nomeManual: pubForm.nome.trim(),
+                    cargo: pubForm.cargo.trim(),
+                    datas: pubForm.datas.trim(),
+                    motivo: pubForm.motivo.trim(),
+                    documento: pubForm.documento.trim(),
+                    status: "pendente",
+                    criadoEm: new Date().toISOString(),
+                  };
+                  saveJustificativas([...justificativas, nova]);
+                  setPubSent(true);
+                  setPubForm({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
+                }
+
+                if (pubSent) return (
+                  <div style={{ textAlign: "center", padding: "20px 0" }}>
+                    <div style={{ fontSize: 50, marginBottom: 16 }}>✅</div>
+                    <div style={{ fontSize: 18, fontWeight: "bold", marginBottom: 8 }}>Justificativa enviada!</div>
+                    <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>Sua justificativa foi recebida e será analisada pelo gestor.</div>
+                    <button onClick={() => setPubSent(false)} style={{ padding: "10px 24px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Enviar outra justificativa</button>
+                  </div>
+                );
+
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {[
+                      { label: "Nome Completo", key: "nome", placeholder: "Seu nome completo", type: "text", required: true },
+                      { label: "Função / Cargo", key: "cargo", placeholder: "Seu cargo na escola", type: "text", required: true },
+                      { label: "Data(s) da Ausência", key: "datas", placeholder: "Ex: 28/02/2026 ou 28/02, 01/03/2026", type: "text", required: true },
+                    ].map(({ label, key, placeholder, type, required }) => (
+                      <div key={key}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>{label}{required && <span style={{ color: "#ef4444" }}> *</span>}</label>
+                        <input type={type} value={pubForm[key]} onChange={e => setPubForm(f => ({ ...f, [key]: e.target.value }))} placeholder={placeholder} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      </div>
+                    ))}
+
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Motivo da Ausência <span style={{ color: "#ef4444" }}>*</span></label>
+                      <textarea value={pubForm.motivo} onChange={e => setPubForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Descreva o motivo da ausência com detalhes..." rows={4} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", resize: "vertical", fontFamily: "sans-serif" }} />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Anexar Documento <span style={{ color: "#64748b", fontWeight: 400, textTransform: "none" }}>(opcional)</span></label>
+                      <input type="url" value={pubForm.documento} onChange={e => setPubForm(f => ({ ...f, documento: e.target.value }))} placeholder="Cole o link do documento (Google Drive, etc.)" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Compartilhe o arquivo no Google Drive e cole o link aqui</div>
+                    </div>
+
+                    {pubError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>⚠️ {pubError}</div>}
+
+                    <button onClick={handlePublicSubmit} style={{ padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", marginTop: 4 }}>
+                      📤 Enviar Justificativa
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1044,6 +1209,142 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══════════ JUSTIFICATIVAS ══════════ */}
+        {tab === "justificativas" && (
+          <div>
+            {/* Header */}
+            <div style={{ display: "flex", gap: 12, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 18, fontWeight: "bold" }}>📋 Justificativas</div>
+                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#64748b", marginTop: 2 }}>Gerencie as justificativas de ausência dos funcionários</div>
+              </div>
+              <button onClick={() => { setJustForm({ empId: "", datas: "", motivo: "", documento: "" }); setJustError(""); setShowJustModal(true); }} style={{ padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", boxShadow: "0 4px 15px rgba(99,102,241,0.4)", whiteSpace: "nowrap" }}>
+                + Nova Justificativa
+              </button>
+            </div>
+
+            {/* Filtros */}
+            <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20, flexWrap: "wrap" }}>
+              {[["todas","Todas"],["pendente","⏳ Pendentes"],["aprovada","✅ Aprovadas"],["reprovada","❌ Reprovadas"]].map(([val, label]) => {
+                const count = val === "todas" ? justificativas.length : justificativas.filter(j => j.status === val).length;
+                return (
+                  <button key={val} onClick={() => setJustFilter(val)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 12, fontWeight: 600, transition: "all 0.2s", background: justFilter === val ? "#6366f1" : "transparent", color: justFilter === val ? "#fff" : "#94a3b8" }}>
+                    {label} <span style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "1px 7px", fontSize: 11 }}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Lista */}
+            {justificativas.filter(j => justFilter === "todas" || j.status === justFilter).length === 0 ? (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: "#475569", fontFamily: "sans-serif" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+                <div>Nenhuma justificativa {justFilter !== "todas" ? justFilter : "registrada"} ainda.</div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 12 }}>
+                {justificativas
+                  .filter(j => justFilter === "todas" || j.status === justFilter)
+                  .sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm))
+                  .map(just => {
+                    const emp = employees.find(e => e.id === just.empId);
+                    const statusCfg = {
+                      pendente:  { label: "Pendente",  color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.3)",  icon: "⏳" },
+                      aprovada:  { label: "Aprovada",  color: "#22c55e", bg: "rgba(34,197,94,0.1)",   border: "rgba(34,197,94,0.3)",   icon: "✅" },
+                      reprovada: { label: "Reprovada", color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)",   icon: "❌" },
+                    }[just.status];
+                    const dataRegistro = new Date(just.criadoEm).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                    return (
+                      <div key={just.id} style={{ background: statusCfg.bg, border: `1px solid ${statusCfg.border}`, borderRadius: 16, padding: "18px 20px", transition: "all 0.2s" }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+                          {/* Avatar */}
+                          <div style={{ width: 44, height: 44, borderRadius: "50%", background: emp ? avatarColor(emp.id) : "#334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: "bold", flexShrink: 0 }}>
+                            {emp ? getInitials(emp.name) : "?"}
+                          </div>
+                          {/* Info */}
+                          <div style={{ flex: 1, minWidth: 200 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+                              <span style={{ fontSize: 15, fontWeight: 700 }}>{emp ? emp.name : "Funcionário removido"}</span>
+                              <span style={{ fontFamily: "sans-serif", fontSize: 11, background: `${statusCfg.color}25`, color: statusCfg.color, borderRadius: 6, padding: "2px 9px", fontWeight: 700 }}>{statusCfg.icon} {statusCfg.label}</span>
+                            </div>
+                            {emp && <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>{emp.role}</div>}
+                            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontFamily: "sans-serif", fontSize: 13 }}>
+                              <span style={{ color: "#64748b", fontWeight: 600 }}>📅 Data(s):</span>
+                              <span style={{ color: "#e2e8f0" }}>{just.datas}</span>
+                              <span style={{ color: "#64748b", fontWeight: 600 }}>📝 Motivo:</span>
+                              <span style={{ color: "#e2e8f0" }}>{just.motivo}</span>
+                              {just.documento && (<>
+                                <span style={{ color: "#64748b", fontWeight: 600 }}>📎 Doc:</span>
+                                <a href={just.documento} target="_blank" rel="noreferrer" style={{ color: "#a5b4fc", fontSize: 12 }}>Ver documento</a>
+                              </>)}
+                            </div>
+                            <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#475569", marginTop: 8 }}>Registrado em: {dataRegistro}</div>
+                          </div>
+                          {/* Ações */}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+                            {just.status === "pendente" && (<>
+                              <button onClick={() => aprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>✅ Aprovar</button>
+                              <button onClick={() => reprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#ef4444", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>❌ Reprovar</button>
+                            </>)}
+                            {just.status !== "pendente" && (
+                              <button onClick={() => { const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "pendente" } : j); saveJustificativas(updated); showToast("Reaberta para análise."); }} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>↩ Reabrir</button>
+                            )}
+                            <button onClick={() => removerJustificativa(just.id)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(100,116,139,0.15)", color: "#94a3b8", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>🗑️ Remover</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+
+            {/* Modal Nova Justificativa */}
+            {showJustModal && (
+              <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                <div onClick={() => setShowJustModal(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(5px)" }} />
+                <div style={{ position: "relative", width: "100%", maxWidth: 500, background: "#1a2640", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, padding: "28px 26px 24px", boxShadow: "0 25px 60px rgba(0,0,0,0.6)", maxHeight: "90vh", overflowY: "auto" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+                    <div style={{ fontSize: 17, fontWeight: "bold" }}>📋 Nova Justificativa</div>
+                    <button onClick={() => setShowJustModal(false)} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}>×</button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: "sans-serif" }}>
+                    {/* Funcionário */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Funcionário *</label>
+                      <select value={justForm.empId} onChange={e => setJustForm(f => ({ ...f, empId: e.target.value }))} style={{ width: "100%", background: "#1e293b", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: justForm.empId ? "#f1f5f9" : "#64748b", fontSize: 14, outline: "none", cursor: "pointer" }}>
+                        <option value="">Selecione o funcionário...</option>
+                        {employees.filter(e => e.active).map(e => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}
+                      </select>
+                    </div>
+                    {/* Datas */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Data(s) da Ausência *</label>
+                      <input type="text" value={justForm.datas} onChange={e => setJustForm(f => ({ ...f, datas: e.target.value }))} placeholder="Ex: 28/02/2026 ou 28/02, 01/03/2026" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Para múltiplas datas, separe por vírgula</div>
+                    </div>
+                    {/* Motivo */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Motivo da Ausência *</label>
+                      <textarea value={justForm.motivo} onChange={e => setJustForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Descreva o motivo da ausência..." rows={3} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", resize: "vertical", fontFamily: "sans-serif" }} />
+                    </div>
+                    {/* Documento */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Link do Documento (opcional)</label>
+                      <input type="url" value={justForm.documento} onChange={e => setJustForm(f => ({ ...f, documento: e.target.value }))} placeholder="Cole o link do documento aqui" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Ex: link do Google Drive, WhatsApp, etc.</div>
+                    </div>
+                    {justError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>⚠️ {justError}</div>}
+                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                      <button onClick={() => setShowJustModal(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
+                      <button onClick={handleAddJustificativa} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)" }}>✓ Registrar Justificativa</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
