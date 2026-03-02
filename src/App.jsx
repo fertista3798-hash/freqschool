@@ -244,20 +244,23 @@ const STATUS_ICON_DISPLAY = {
 ───────────────────────────────────────────── */
 const getTodayStr = () => new Date().toISOString().split("T")[0];
 
-function getWeekDates() {
+function getWeekDates(offset = 0) {
   const today = new Date(), day = today.getDay();
   const mon = new Date(today);
-  mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
+  mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(mon); d.setDate(mon.getDate() + i);
     return d.toISOString().split("T")[0];
   });
 }
 
-function getMonthDates() {
-  const t = new Date(), days = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+function getMonthDates(offset = 0) {
+  const t = new Date();
+  const year  = t.getFullYear();
+  const month = t.getMonth() + offset;
+  const days  = new Date(year, month + 1, 0).getDate();
   return Array.from({ length: days }, (_, i) =>
-    new Date(t.getFullYear(), t.getMonth(), i + 1).toISOString().split("T")[0]);
+    new Date(year, month, i + 1).toISOString().split("T")[0]);
 }
 
 const formatDate      = (s) => { const [y, m, d] = s.split("-"); return `${d}/${m}/${y}`; };
@@ -502,6 +505,7 @@ export default function App() {
   const [records, setRecords]       = useState({});
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [reportType, setReportType] = useState("semanal");
+  const [reportOffset, setReportOffset] = useState(0);
   const [saved, setSaved]           = useState(false);
   const [pdfLoading, setPdfLoading]   = useState(false);
 
@@ -519,7 +523,6 @@ export default function App() {
   const [formError, setFormError]       = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [searchCad, setSearchCad]       = useState("");
-  const [searchRegistro, setSearchRegistro] = useState("");
 
   // Escola
   const [showSchoolModal, setShowSchoolModal] = useState(false);
@@ -735,9 +738,10 @@ export default function App() {
   const filledSlots     = activeOthers.filter(e => getStatus(e.id)).length
                         + activeApoio.reduce((a, e) => a + TURNOS.filter(t => getStatus(e.id, selectedDate, t)).length, 0);
 
-  const reportDates = reportType === "semanal" ? getWeekDates() : getMonthDates();
+  const reportDates = reportType === "semanal" ? getWeekDates(reportOffset) : getMonthDates(reportOffset);
   const today       = new Date();
-  const monthName   = today.toLocaleString("pt-BR", { month: "long", year: "numeric" });
+  const reportMonthDate = new Date(today.getFullYear(), today.getMonth() + reportOffset, 1);
+  const monthName   = reportMonthDate.toLocaleString("pt-BR", { month: "long", year: "numeric" });
   const filteredCad = employees.filter(e =>
     e.name.toLowerCase().includes(searchCad.toLowerCase()) ||
     e.role.toLowerCase().includes(searchCad.toLowerCase()));
@@ -917,52 +921,21 @@ export default function App() {
         {/* ══════════ REGISTRO ══════════ */}
         {tab === "registro" && (
           <div>
-            <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
               <div>
                 <label style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8", display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>DATA</label>
                 <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 14px", color: "#f1f5f9", fontSize: 14, fontFamily: "sans-serif", outline: "none" }} />
               </div>
-            </div>
-
-            {/* ── Painel resumo da ronda ── */}
-            {activeEmployees.length > 0 && (() => {
-              const pendentes = activeOthers.filter(e => !getStatus(e.id)).length
-                + activeApoio.filter(e => !apoioFilled(e.id)).length;
-              const registrados = activeEmployees.length - pendentes;
-              const pct = activeEmployees.length > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
-              const concluido = pendentes === 0;
-              return (
-                <div style={{ marginBottom: 16, borderRadius: 16, overflow: "hidden", border: concluido ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(255,255,255,0.08)", background: concluido ? "rgba(34,197,94,0.07)" : "rgba(255,255,255,0.03)" }}>
-                  <div style={{ padding: "12px 18px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-                    {/* Progresso */}
-                    <div style={{ flex: 1, minWidth: 160 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: concluido ? "#22c55e" : "#a5b4fc" }}>
-                          {concluido ? "✓ Ronda concluída!" : "⏳ Ronda em andamento"}
-                        </span>
-                        <span style={{ fontFamily: "sans-serif", fontSize: 13, fontWeight: 900, color: concluido ? "#22c55e" : "#f1f5f9" }}>{pct}%</span>
-                      </div>
-                      <div style={{ height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 4, overflow: "hidden" }}>
-                        <div style={{ height: "100%", borderRadius: 4, background: concluido ? "#22c55e" : "linear-gradient(90deg,#6366f1,#22c55e)", width: `${pct}%`, transition: "width 0.4s" }} />
-                      </div>
-                    </div>
-                    {/* Contadores */}
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <div style={{ textAlign: "center", background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 10, padding: "8px 14px" }}>
-                        <div style={{ fontFamily: "sans-serif", fontSize: 18, fontWeight: 900, color: "#22c55e" }}>{registrados}</div>
-                        <div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b" }}>registrados</div>
-                      </div>
-                      {pendentes > 0 && (
-                        <div style={{ textAlign: "center", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "8px 14px" }}>
-                          <div style={{ fontFamily: "sans-serif", fontSize: 18, fontWeight: 900, color: "#f59e0b" }}>{pendentes}</div>
-                          <div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b" }}>pendentes</div>
-                        </div>
-                      )}
-                    </div>
+              <div style={{ flex: 1, minWidth: 200, ...card, padding: "14px 18px" }}>
+                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>Registros em {formatDate(selectedDate)}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1, height: 7, background: "rgba(255,255,255,0.08)", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 4, background: "linear-gradient(90deg,#6366f1,#22c55e)", width: `${totalSlots > 0 ? (filledSlots / totalSlots) * 100 : 0}%`, transition: "width 0.4s" }} />
                   </div>
+                  <span style={{ fontFamily: "sans-serif", fontSize: 14, color: "#a5b4fc", fontWeight: 700 }}>{filledSlots}/{totalSlots}</span>
                 </div>
-              );
-            })()}
+              </div>
+            </div>
 
             {/* Legend */}
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -986,63 +959,21 @@ export default function App() {
             ) : (
               <div style={{ display: "grid", gap: 14 }}>
 
-                {/* Busca rápida */}
-                <div style={{ position: "relative" }}>
-                  <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 16, pointerEvents: "none" }}>🔍</span>
-                  <input
-                    type="text"
-                    placeholder="Buscar funcionário..."
-                    value={searchRegistro}
-                    onChange={e => setSearchRegistro(e.target.value)}
-                    autoComplete="off"
-                    style={{ width: "100%", boxSizing: "border-box", background: "rgba(99,102,241,0.08)", border: searchRegistro ? "1px solid rgba(99,102,241,0.5)" : "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 14px 12px 40px", color: "#f1f5f9", fontSize: 15, fontFamily: "sans-serif", outline: "none", transition: "border 0.2s" }}
-                  />
-                  {searchRegistro && (
-                    <button onClick={() => setSearchRegistro("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", color: "#94a3b8", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-                  )}
-                </div>
-
                 {/* Regulares */}
-                {activeOthers.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).length > 0 && (
+                {activeOthers.length > 0 && (
                   <div>
                     <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Funcionários</div>
                     <div style={{ display: "grid", gap: 8 }}>
-                      {activeOthers.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).map(emp => {
+                      {activeOthers.map(emp => {
                         const status = getStatus(emp.id); const cfg = status ? STATUS_CONFIG[status] : null;
-                        const pendente = !status;
                         return (
-                          <div key={emp.id} style={{
-                            background: status ? `${cfg.color}0d` : "rgba(255,255,255,0.04)",
-                            border: `1px solid ${status ? cfg.color + "40" : pendente ? "rgba(245,158,11,0.25)" : "rgba(255,255,255,0.08)"}`,
-                            borderRadius: 14, padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", transition: "all 0.2s"
-                          }}>
-                            <div style={{ position: "relative", flexShrink: 0 }}>
-                              <div style={{ width: 38, height: 38, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: "bold" }}>{getInitials(emp.name)}</div>
-                              {pendente && <div style={{ position: "absolute", top: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: "#f59e0b", border: "2px solid #0f172a" }} />}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 100 }}>
+                          <div key={emp.id} style={{ background: status ? `${cfg.color}0d` : "rgba(255,255,255,0.04)", border: `1px solid ${status ? cfg.color + "40" : "rgba(255,255,255,0.08)"}`, borderRadius: 14, padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", transition: "all 0.2s" }}>
+                            <div style={{ width: 38, height: 38, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
+                            <div style={{ flex: 1, minWidth: 120 }}>
                               <div style={{ fontSize: 14, fontWeight: 600 }}>{emp.name}</div>
                               <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "sans-serif" }}>{emp.role}</div>
                             </div>
-                            {/* Botão presente rápido + menu secundário */}
-                            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                              {!status ? (
-                                <>
-                                  <button onClick={() => setStatus(emp.id, "presente")} style={{ padding: "8px 16px", borderRadius: 10, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-                                    ✓ Presente
-                                  </button>
-                                  <div style={{ display: "flex", gap: 4 }}>
-                                    {Object.entries(STATUS_CONFIG).filter(([k]) => k !== "presente").map(([k, v]) => (
-                                      <button key={k} onClick={() => setStatus(emp.id, k)} title={v.label} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: `${v.color}20`, color: v.color, fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                        {STATUS_ICON_DISPLAY[k]}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </>
-                              ) : (
-                                <StatusBtns current={status} onSelect={s => setStatus(emp.id, s)} />
-                              )}
-                            </div>
+                            <StatusBtns current={status} onSelect={s => setStatus(emp.id, s)} />
                             <WaBtn emp={emp} />
                             {status && <div style={{ width: 8, height: 8, borderRadius: "50%", background: cfg.color, boxShadow: `0 0 8px ${cfg.color}`, flexShrink: 0 }} />}
                           </div>
@@ -1053,22 +984,19 @@ export default function App() {
                 )}
 
                 {/* Profissionais de Apoio */}
-                {activeApoio.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).length > 0 && (
+                {activeApoio.length > 0 && (
                   <div>
                     <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
                       <span>Profissionais de Apoio</span>
                       <span style={{ background: "rgba(99,102,241,0.2)", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#a5b4fc" }}>Frequência por turno</span>
                     </div>
                     <div style={{ display: "grid", gap: 10 }}>
-                      {activeApoio.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).map(emp => {
+                      {activeApoio.map(emp => {
                         const allFilled = apoioFilled(emp.id);
                         return (
-                          <div key={emp.id} style={{ ...card, borderColor: allFilled ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.2)", borderRadius: 16, overflow: "hidden", transition: "border-color 0.3s" }}>
+                          <div key={emp.id} style={{ ...card, borderColor: allFilled ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden", transition: "border-color 0.3s" }}>
                             <div style={{ padding: "12px 18px", background: allFilled ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.02)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", gap: 12 }}>
-                              <div style={{ position: "relative", flexShrink: 0 }}>
-                                <div style={{ width: 36, height: 36, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: "bold" }}>{getInitials(emp.name)}</div>
-                                {!allFilled && <div style={{ position: "absolute", top: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: "#f59e0b", border: "2px solid #0f172a" }} />}
-                              </div>
+                              <div style={{ width: 36, height: 36, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
                               <div style={{ flex: 1 }}>
                                 <div style={{ fontSize: 14, fontWeight: 600 }}>{emp.name}</div>
                                 <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#a5b4fc" }}>Profissional de Apoio</div>
@@ -1086,19 +1014,7 @@ export default function App() {
                                       <span style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: TURNO_COLOR[turno] }}>{TURNO_LABEL[turno]}</span>
                                       {status && <span style={{ marginLeft: "auto", fontFamily: "sans-serif", fontSize: 11, color: cfg.color, fontWeight: 600 }}>{STATUS_ICON_DISPLAY[status]} {cfg.label}</span>}
                                     </div>
-                                    {/* Botão presente rápido para apoio */}
-                                    {!status ? (
-                                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                                        <button onClick={() => setStatus(emp.id, "presente", turno)} style={{ padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 12, fontWeight: 700, fontFamily: "sans-serif", whiteSpace: "nowrap" }}>✓ Presente</button>
-                                        {Object.entries(STATUS_CONFIG).filter(([k]) => k !== "presente").map(([k, v]) => (
-                                          <button key={k} onClick={() => setStatus(emp.id, k, turno)} title={v.label} style={{ width: 28, height: 28, borderRadius: 7, border: "none", cursor: "pointer", background: `${v.color}20`, color: v.color, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                            {STATUS_ICON_DISPLAY[k]}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <StatusBtns current={status} onSelect={s => setStatus(emp.id, s, turno)} compact />
-                                    )}
+                                    <StatusBtns current={status} onSelect={s => setStatus(emp.id, s, turno)} compact />
                                   </div>
                                 );
                               })}
@@ -1109,15 +1025,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-
-                {/* Sem resultados */}
-                {searchRegistro && activeEmployees.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).length === 0 && (
-                  <div style={{ textAlign: "center", padding: "40px 20px", color: "#475569", fontFamily: "sans-serif" }}>
-                    <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
-                    <div>Nenhum funcionário encontrado para <strong style={{ color: "#a5b4fc" }}>"{searchRegistro}"</strong></div>
-                  </div>
-                )}
-
               </div>
             )}
 
@@ -1129,16 +1036,30 @@ export default function App() {
           </div>
         )}
 
-        {/* ══════════ RELATÓRIO ══════════ */}
         {tab === "relatorio" && (
           <div>
             <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
+              {/* Seletor semanal/mensal */}
               <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 4 }}>
                 {["semanal", "mensal"].map(r => (
-                  <button key={r} onClick={() => setReportType(r)} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: reportType === r ? "#6366f1" : "transparent", color: reportType === r ? "#fff" : "#94a3b8" }}>{r === "semanal" ? "📅 Semanal" : "🗓️ Mensal"}</button>
+                  <button key={r} onClick={() => { setReportType(r); setReportOffset(0); }} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: reportType === r ? "#6366f1" : "transparent", color: reportType === r ? "#fff" : "#94a3b8" }}>{r === "semanal" ? "📅 Semanal" : "🗓️ Mensal"}</button>
                 ))}
               </div>
-              <span style={{ fontFamily: "sans-serif", fontSize: 13, color: "#94a3b8" }}>{reportType === "semanal" ? "Semana atual" : monthName}</span>
+
+              {/* Navegação de período */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "4px 6px" }}>
+                <button onClick={() => setReportOffset(o => o - 1)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(255,255,255,0.07)", color: "#a5b4fc", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
+                <span style={{ fontFamily: "sans-serif", fontSize: 13, color: reportOffset === 0 ? "#a5b4fc" : "#f1f5f9", fontWeight: 600, minWidth: 130, textAlign: "center" }}>
+                  {reportType === "semanal"
+                    ? reportOffset === 0 ? "Esta semana"
+                      : reportOffset === -1 ? "Semana passada"
+                      : `${Math.abs(reportOffset)} sem. atrás`
+                    : reportOffset === 0 ? "Este mês" : monthName.charAt(0).toUpperCase() + monthName.slice(1)}
+                </span>
+                <button onClick={() => setReportOffset(o => Math.min(o + 1, 0))} disabled={reportOffset === 0} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: reportOffset === 0 ? "not-allowed" : "pointer", background: reportOffset === 0 ? "transparent" : "rgba(255,255,255,0.07)", color: reportOffset === 0 ? "#334155" : "#a5b4fc", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
+              </div>
+
+              {/* Botões exportar */}
               <button
                 onClick={async () => {
                   setPdfLoading(true);
@@ -1158,6 +1079,46 @@ export default function App() {
               </button>
             </div>
 
+            {/* Alerta frequência baixa */}
+            {(() => {
+              const emAlerta = activeEmployees.filter(emp => {
+                const sm = getEmpSummary(emp);
+                if (IS_APOIO(emp.role)) {
+                  return TURNOS.some(t => sm[t].pct !== null && sm[t].pct < 75);
+                }
+                return sm.geral.pct !== null && sm.geral.pct < 75;
+              });
+              if (emAlerta.length === 0) return null;
+              return (
+                <div style={{ marginBottom: 18, borderRadius: 14, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", padding: "14px 18px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontFamily: "sans-serif" }}>
+                    <span style={{ fontSize: 18 }}>⚠️</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5" }}>
+                      {emAlerta.length} funcionário{emAlerta.length > 1 ? "s" : ""} com frequência abaixo de 75%
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {emAlerta.map(emp => {
+                      const sm = getEmpSummary(emp);
+                      const apoio = IS_APOIO(emp.role);
+                      const pct = apoio
+                        ? Math.min(...TURNOS.map(t => sm[t].pct ?? 100))
+                        : sm.geral.pct;
+                      return (
+                        <div key={emp.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 10, padding: "7px 12px" }}>
+                          <div style={{ width: 28, height: 28, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
+                          <div>
+                            <div style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 600, color: "#f1f5f9" }}>{emp.name.split(" ")[0]}</div>
+                            <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 900, color: "#ef4444" }}>{pct}% presença</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 22 }}>
               {Object.entries(STATUS_CONFIG).map(([k, v]) => {
                 const total = reportDates.reduce((acc, d) => {
@@ -1171,20 +1132,24 @@ export default function App() {
 
             <div style={{ ...card, overflow: "hidden", marginBottom: 22 }}>
               <div style={{ padding: "12px 18px", background: "rgba(99,102,241,0.1)", borderBottom: "1px solid rgba(255,255,255,0.07)", fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: "#a5b4fc", letterSpacing: 1, textTransform: "uppercase" }}>
-                Resumo por Funcionário — {reportType === "semanal" ? "Esta Semana" : monthName}
+                Resumo por Funcionário — {reportType === "semanal" ? (reportOffset === 0 ? "Esta Semana" : reportOffset === -1 ? "Semana Passada" : `${Math.abs(reportOffset)} Semanas Atrás`) : monthName.charAt(0).toUpperCase() + monthName.slice(1)}
               </div>
               {activeEmployees.length === 0 ? (
                 <div style={{ padding: "30px", textAlign: "center", color: "#475569", fontFamily: "sans-serif", fontSize: 13 }}>Nenhum funcionário ativo.</div>
               ) : activeEmployees.map((emp, i) => {
                 const sm = getEmpSummary(emp), apoio = IS_APOIO(emp.role);
+                const baixaFreq = apoio
+                  ? TURNOS.some(t => sm[t].pct !== null && sm[t].pct < 75)
+                  : sm.geral.pct !== null && sm.geral.pct < 75;
                 return (
-                  <div key={emp.id} style={{ padding: "13px 18px", borderBottom: i < activeEmployees.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                  <div key={emp.id} style={{ padding: "13px 18px", borderBottom: i < activeEmployees.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none", background: baixaFreq ? "rgba(239,68,68,0.04)" : "transparent", borderLeft: baixaFreq ? "3px solid #ef4444" : "3px solid transparent", transition: "all 0.2s" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                       <div style={{ width: 34, height: 34, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
                       <div style={{ flex: 1, minWidth: 120 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                           {emp.name}
                           {apoio && <span style={{ fontFamily: "sans-serif", fontSize: 10, background: "rgba(99,102,241,0.2)", color: "#a5b4fc", borderRadius: 5, padding: "1px 6px" }}>Apoio</span>}
+                          {baixaFreq && <span style={{ fontFamily: "sans-serif", fontSize: 10, background: "rgba(239,68,68,0.2)", color: "#f87171", borderRadius: 5, padding: "1px 6px" }}>⚠️ Freq. baixa</span>}
                         </div>
                         <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "sans-serif" }}>{emp.role}</div>
                       </div>
