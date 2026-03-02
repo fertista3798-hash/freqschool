@@ -917,21 +917,52 @@ export default function App() {
         {/* ══════════ REGISTRO ══════════ */}
         {tab === "registro" && (
           <div>
-            <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
               <div>
                 <label style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8", display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>DATA</label>
                 <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "10px 14px", color: "#f1f5f9", fontSize: 14, fontFamily: "sans-serif", outline: "none" }} />
               </div>
-              <div style={{ flex: 1, minWidth: 200, ...card, padding: "14px 18px" }}>
-                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>Registros em {formatDate(selectedDate)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ flex: 1, height: 7, background: "rgba(255,255,255,0.08)", borderRadius: 4, overflow: "hidden" }}>
-                    <div style={{ height: "100%", borderRadius: 4, background: "linear-gradient(90deg,#6366f1,#22c55e)", width: `${totalSlots > 0 ? (filledSlots / totalSlots) * 100 : 0}%`, transition: "width 0.4s" }} />
-                  </div>
-                  <span style={{ fontFamily: "sans-serif", fontSize: 14, color: "#a5b4fc", fontWeight: 700 }}>{filledSlots}/{totalSlots}</span>
-                </div>
-              </div>
             </div>
+
+            {/* ── Painel resumo da ronda ── */}
+            {activeEmployees.length > 0 && (() => {
+              const pendentes = activeOthers.filter(e => !getStatus(e.id)).length
+                + activeApoio.filter(e => !apoioFilled(e.id)).length;
+              const registrados = activeEmployees.length - pendentes;
+              const pct = activeEmployees.length > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
+              const concluido = pendentes === 0;
+              return (
+                <div style={{ marginBottom: 16, borderRadius: 16, overflow: "hidden", border: concluido ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(255,255,255,0.08)", background: concluido ? "rgba(34,197,94,0.07)" : "rgba(255,255,255,0.03)" }}>
+                  <div style={{ padding: "12px 18px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                    {/* Progresso */}
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: concluido ? "#22c55e" : "#a5b4fc" }}>
+                          {concluido ? "✓ Ronda concluída!" : "⏳ Ronda em andamento"}
+                        </span>
+                        <span style={{ fontFamily: "sans-serif", fontSize: 13, fontWeight: 900, color: concluido ? "#22c55e" : "#f1f5f9" }}>{pct}%</span>
+                      </div>
+                      <div style={{ height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ height: "100%", borderRadius: 4, background: concluido ? "#22c55e" : "linear-gradient(90deg,#6366f1,#22c55e)", width: `${pct}%`, transition: "width 0.4s" }} />
+                      </div>
+                    </div>
+                    {/* Contadores */}
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ textAlign: "center", background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 10, padding: "8px 14px" }}>
+                        <div style={{ fontFamily: "sans-serif", fontSize: 18, fontWeight: 900, color: "#22c55e" }}>{registrados}</div>
+                        <div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b" }}>registrados</div>
+                      </div>
+                      {pendentes > 0 && (
+                        <div style={{ textAlign: "center", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "8px 14px" }}>
+                          <div style={{ fontFamily: "sans-serif", fontSize: 18, fontWeight: 900, color: "#f59e0b" }}>{pendentes}</div>
+                          <div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b" }}>pendentes</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Legend */}
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -978,14 +1009,40 @@ export default function App() {
                     <div style={{ display: "grid", gap: 8 }}>
                       {activeOthers.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).map(emp => {
                         const status = getStatus(emp.id); const cfg = status ? STATUS_CONFIG[status] : null;
+                        const pendente = !status;
                         return (
-                          <div key={emp.id} style={{ background: status ? `${cfg.color}0d` : "rgba(255,255,255,0.04)", border: `1px solid ${status ? cfg.color + "40" : "rgba(255,255,255,0.08)"}`, borderRadius: 14, padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", transition: "all 0.2s" }}>
-                            <div style={{ width: 38, height: 38, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
-                            <div style={{ flex: 1, minWidth: 120 }}>
+                          <div key={emp.id} style={{
+                            background: status ? `${cfg.color}0d` : "rgba(255,255,255,0.04)",
+                            border: `1px solid ${status ? cfg.color + "40" : pendente ? "rgba(245,158,11,0.25)" : "rgba(255,255,255,0.08)"}`,
+                            borderRadius: 14, padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", transition: "all 0.2s"
+                          }}>
+                            <div style={{ position: "relative", flexShrink: 0 }}>
+                              <div style={{ width: 38, height: 38, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: "bold" }}>{getInitials(emp.name)}</div>
+                              {pendente && <div style={{ position: "absolute", top: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: "#f59e0b", border: "2px solid #0f172a" }} />}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 100 }}>
                               <div style={{ fontSize: 14, fontWeight: 600 }}>{emp.name}</div>
                               <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "sans-serif" }}>{emp.role}</div>
                             </div>
-                            <StatusBtns current={status} onSelect={s => setStatus(emp.id, s)} />
+                            {/* Botão presente rápido + menu secundário */}
+                            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                              {!status ? (
+                                <>
+                                  <button onClick={() => setStatus(emp.id, "presente")} style={{ padding: "8px 16px", borderRadius: 10, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                                    ✓ Presente
+                                  </button>
+                                  <div style={{ display: "flex", gap: 4 }}>
+                                    {Object.entries(STATUS_CONFIG).filter(([k]) => k !== "presente").map(([k, v]) => (
+                                      <button key={k} onClick={() => setStatus(emp.id, k)} title={v.label} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: `${v.color}20`, color: v.color, fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                        {STATUS_ICON_DISPLAY[k]}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : (
+                                <StatusBtns current={status} onSelect={s => setStatus(emp.id, s)} />
+                              )}
+                            </div>
                             <WaBtn emp={emp} />
                             {status && <div style={{ width: 8, height: 8, borderRadius: "50%", background: cfg.color, boxShadow: `0 0 8px ${cfg.color}`, flexShrink: 0 }} />}
                           </div>
@@ -1006,9 +1063,12 @@ export default function App() {
                       {activeApoio.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).map(emp => {
                         const allFilled = apoioFilled(emp.id);
                         return (
-                          <div key={emp.id} style={{ ...card, borderColor: allFilled ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden", transition: "border-color 0.3s" }}>
+                          <div key={emp.id} style={{ ...card, borderColor: allFilled ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.2)", borderRadius: 16, overflow: "hidden", transition: "border-color 0.3s" }}>
                             <div style={{ padding: "12px 18px", background: allFilled ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.02)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", gap: 12 }}>
-                              <div style={{ width: 36, height: 36, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
+                              <div style={{ position: "relative", flexShrink: 0 }}>
+                                <div style={{ width: 36, height: 36, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: "bold" }}>{getInitials(emp.name)}</div>
+                                {!allFilled && <div style={{ position: "absolute", top: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: "#f59e0b", border: "2px solid #0f172a" }} />}
+                              </div>
                               <div style={{ flex: 1 }}>
                                 <div style={{ fontSize: 14, fontWeight: 600 }}>{emp.name}</div>
                                 <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#a5b4fc" }}>Profissional de Apoio</div>
@@ -1026,7 +1086,19 @@ export default function App() {
                                       <span style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: TURNO_COLOR[turno] }}>{TURNO_LABEL[turno]}</span>
                                       {status && <span style={{ marginLeft: "auto", fontFamily: "sans-serif", fontSize: 11, color: cfg.color, fontWeight: 600 }}>{STATUS_ICON_DISPLAY[status]} {cfg.label}</span>}
                                     </div>
-                                    <StatusBtns current={status} onSelect={s => setStatus(emp.id, s, turno)} compact />
+                                    {/* Botão presente rápido para apoio */}
+                                    {!status ? (
+                                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                        <button onClick={() => setStatus(emp.id, "presente", turno)} style={{ padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 12, fontWeight: 700, fontFamily: "sans-serif", whiteSpace: "nowrap" }}>✓ Presente</button>
+                                        {Object.entries(STATUS_CONFIG).filter(([k]) => k !== "presente").map(([k, v]) => (
+                                          <button key={k} onClick={() => setStatus(emp.id, k, turno)} title={v.label} style={{ width: 28, height: 28, borderRadius: 7, border: "none", cursor: "pointer", background: `${v.color}20`, color: v.color, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                            {STATUS_ICON_DISPLAY[k]}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <StatusBtns current={status} onSelect={s => setStatus(emp.id, s, turno)} compact />
+                                    )}
                                   </div>
                                 );
                               })}
