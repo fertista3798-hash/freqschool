@@ -412,11 +412,84 @@ function StatusBtns({ current, onSelect, compact }) {
 /* ─────────────────────────────────────────────
    APP PRINCIPAL
 ───────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   FORMULÁRIO PÚBLICO DE JUSTIFICATIVA
+───────────────────────────────────────────── */
+function PublicJustForm({ employees, justificativas, saveJustificativas }) {
+  const [pubForm, setPubForm] = useState({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
+  const [pubError, setPubError] = useState("");
+  const [pubSent, setPubSent] = useState(false);
+
+  function handlePublicSubmit() {
+    if (!pubForm.nome.trim()) { setPubError("Informe seu nome completo."); return; }
+    if (!pubForm.cargo.trim()) { setPubError("Informe seu cargo."); return; }
+    if (!pubForm.datas.trim()) { setPubError("Informe a(s) data(s) de ausência."); return; }
+    if (!pubForm.motivo.trim()) { setPubError("Informe o motivo."); return; }
+    setPubError("");
+    const empMatch = employees.find(e => e.name.toLowerCase().includes(pubForm.nome.trim().toLowerCase()));
+    const nova = {
+      id: Date.now(),
+      empId: empMatch ? empMatch.id : null,
+      nomeManual: pubForm.nome.trim(),
+      cargo: pubForm.cargo.trim(),
+      datas: pubForm.datas.trim(),
+      motivo: pubForm.motivo.trim(),
+      documento: pubForm.documento.trim(),
+      status: "pendente",
+      criadoEm: new Date().toISOString(),
+    };
+    saveJustificativas([...justificativas, nova]);
+    setPubSent(true);
+    setPubForm({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
+  }
+
+  const inputStyle = { width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" };
+  const labelStyle = { fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 };
+
+  if (pubSent) return (
+    <div style={{ textAlign: "center", padding: "20px 0" }}>
+      <div style={{ fontSize: 50, marginBottom: 16 }}>✅</div>
+      <div style={{ fontSize: 18, fontWeight: "bold", marginBottom: 8 }}>Justificativa enviada!</div>
+      <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>Sua justificativa foi recebida e será analisada pelo gestor.</div>
+      <button onClick={() => setPubSent(false)} style={{ padding: "10px 24px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Enviar outra justificativa</button>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {[
+        { label: "Nome Completo", key: "nome", placeholder: "Seu nome completo", type: "text", required: true },
+        { label: "Função / Cargo", key: "cargo", placeholder: "Seu cargo na escola", type: "text", required: true },
+        { label: "Data(s) da Ausência", key: "datas", placeholder: "Ex: 28/02/2026 ou 28/02, 01/03/2026", type: "text", required: true },
+      ].map(({ label, key, placeholder, type, required }) => (
+        <div key={key}>
+          <label style={labelStyle}>{label}{required && <span style={{ color: "#ef4444" }}> *</span>}</label>
+          <input type={type} value={pubForm[key]} onChange={e => setPubForm(f => ({ ...f, [key]: e.target.value }))} placeholder={placeholder} style={inputStyle} />
+        </div>
+      ))}
+      <div>
+        <label style={labelStyle}>Motivo da Ausência <span style={{ color: "#ef4444" }}>*</span></label>
+        <textarea value={pubForm.motivo} onChange={e => setPubForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Descreva o motivo da ausência com detalhes..." rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: "sans-serif" }} />
+      </div>
+      <div>
+        <label style={labelStyle}>Anexar Documento <span style={{ color: "#64748b", fontWeight: 400, textTransform: "none" }}>(opcional)</span></label>
+        <input type="url" value={pubForm.documento} onChange={e => setPubForm(f => ({ ...f, documento: e.target.value }))} placeholder="Cole o link do documento (Google Drive, etc.)" style={inputStyle} />
+        <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Compartilhe o arquivo no Google Drive e cole o link aqui</div>
+      </div>
+      {pubError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>⚠️ {pubError}</div>}
+      <button onClick={handlePublicSubmit} style={{ padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", marginTop: 4 }}>
+        📤 Enviar Justificativa
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
-  const [authed, setAuthed]         = useState(false);
-  const [loginUser, setLoginUser]   = useState("");
-  const [loginPass, setLoginPass]   = useState("");
-  const [loginError, setLoginError] = useState("");
+  const [authed, setAuthed]             = useState(false);
+  const [showLoginForm, setShowLoginForm] = useState(false);
+  const [loginUser, setLoginUser]       = useState("");
+  const [loginPass, setLoginPass]       = useState("");
+  const [loginError, setLoginError]     = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [credentials, setCredentials]   = useState({ user: "admin", pass: "escola123" });
   const [showChangeCreds, setShowChangeCreds] = useState(false);
@@ -570,6 +643,7 @@ export default function App() {
     setTimeout(() => {
       if (loginUser.trim() === credentials.user && loginPass === credentials.pass) {
         setAuthed(true);
+        setShowLoginForm(false);
         setLoginError("");
       } else {
         setLoginError("Usuário ou senha incorretos.");
@@ -742,7 +816,7 @@ export default function App() {
               <div style={{ fontSize: 11, color: "#94a3b8" }}>{school.city || "Sistema de Frequência Escolar"}</div>
             </div>
           </div>
-          <button onClick={() => setAuthed("login")} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.4)", background: "rgba(99,102,241,0.1)", color: "#a5b4fc", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={() => { setShowLoginForm(true); setLoginError(""); }} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.4)", background: "rgba(99,102,241,0.1)", color: "#a5b4fc", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             🔐 Acesso do Gestor
           </button>
         </div>
@@ -750,11 +824,11 @@ export default function App() {
         <div style={{ padding: "32px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
 
           {/* Se clicou em "Acesso do Gestor", mostra o form de login */}
-          {authed === "login" && (
+          {showLoginForm && (
             <div style={{ width: "100%", maxWidth: 420, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, padding: "28px 26px", boxShadow: "0 25px 60px rgba(0,0,0,0.4)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
                 <div style={{ fontSize: 17, fontWeight: "bold" }}>🔐 Login do Gestor</div>
-                <button onClick={() => setAuthed(false)} style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 16 }}>×</button>
+                <button onClick={() => { setShowLoginForm(false); setLoginError(""); }} style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 16 }}>×</button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div>
@@ -782,78 +856,7 @@ export default function App() {
             </div>
 
             <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "28px 26px", boxShadow: "0 15px 40px rgba(0,0,0,0.3)" }}>
-              {(() => {
-                const [pubForm, setPubForm] = useState({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
-                const [pubError, setPubError] = useState("");
-                const [pubSent, setPubSent] = useState(false);
-
-                function handlePublicSubmit() {
-                  if (!pubForm.nome.trim()) { setPubError("Informe seu nome completo."); return; }
-                  if (!pubForm.cargo.trim()) { setPubError("Informe seu cargo."); return; }
-                  if (!pubForm.datas.trim()) { setPubError("Informe a(s) data(s) de ausência."); return; }
-                  if (!pubForm.motivo.trim()) { setPubError("Informe o motivo."); return; }
-                  setPubError("");
-
-                  // Tenta encontrar o funcionário pelo nome
-                  const empMatch = employees.find(e => e.name.toLowerCase().includes(pubForm.nome.trim().toLowerCase()));
-
-                  const nova = {
-                    id: Date.now(),
-                    empId: empMatch ? empMatch.id : null,
-                    nomeManual: pubForm.nome.trim(),
-                    cargo: pubForm.cargo.trim(),
-                    datas: pubForm.datas.trim(),
-                    motivo: pubForm.motivo.trim(),
-                    documento: pubForm.documento.trim(),
-                    status: "pendente",
-                    criadoEm: new Date().toISOString(),
-                  };
-                  saveJustificativas([...justificativas, nova]);
-                  setPubSent(true);
-                  setPubForm({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
-                }
-
-                if (pubSent) return (
-                  <div style={{ textAlign: "center", padding: "20px 0" }}>
-                    <div style={{ fontSize: 50, marginBottom: 16 }}>✅</div>
-                    <div style={{ fontSize: 18, fontWeight: "bold", marginBottom: 8 }}>Justificativa enviada!</div>
-                    <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>Sua justificativa foi recebida e será analisada pelo gestor.</div>
-                    <button onClick={() => setPubSent(false)} style={{ padding: "10px 24px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Enviar outra justificativa</button>
-                  </div>
-                );
-
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    {[
-                      { label: "Nome Completo", key: "nome", placeholder: "Seu nome completo", type: "text", required: true },
-                      { label: "Função / Cargo", key: "cargo", placeholder: "Seu cargo na escola", type: "text", required: true },
-                      { label: "Data(s) da Ausência", key: "datas", placeholder: "Ex: 28/02/2026 ou 28/02, 01/03/2026", type: "text", required: true },
-                    ].map(({ label, key, placeholder, type, required }) => (
-                      <div key={key}>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>{label}{required && <span style={{ color: "#ef4444" }}> *</span>}</label>
-                        <input type={type} value={pubForm[key]} onChange={e => setPubForm(f => ({ ...f, [key]: e.target.value }))} placeholder={placeholder} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
-                      </div>
-                    ))}
-
-                    <div>
-                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Motivo da Ausência <span style={{ color: "#ef4444" }}>*</span></label>
-                      <textarea value={pubForm.motivo} onChange={e => setPubForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Descreva o motivo da ausência com detalhes..." rows={4} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", resize: "vertical", fontFamily: "sans-serif" }} />
-                    </div>
-
-                    <div>
-                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Anexar Documento <span style={{ color: "#64748b", fontWeight: 400, textTransform: "none" }}>(opcional)</span></label>
-                      <input type="url" value={pubForm.documento} onChange={e => setPubForm(f => ({ ...f, documento: e.target.value }))} placeholder="Cole o link do documento (Google Drive, etc.)" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
-                      <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Compartilhe o arquivo no Google Drive e cole o link aqui</div>
-                    </div>
-
-                    {pubError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>⚠️ {pubError}</div>}
-
-                    <button onClick={handlePublicSubmit} style={{ padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", marginTop: 4 }}>
-                      📤 Enviar Justificativa
-                    </button>
-                  </div>
-                );
-              })()}
+              <PublicJustForm employees={employees} justificativas={justificativas} saveJustificativas={saveJustificativas} />
             </div>
           </div>
         </div>
@@ -893,7 +896,7 @@ export default function App() {
           <button onClick={() => { setShowChangeCreds(true); setNewUser(credentials.user); setNewPass(""); setNewPass2(""); setLoginError(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#94a3b8", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             🔑 Alterar Senha
           </button>
-          <button onClick={() => { setAuthed(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={() => { setAuthed(false); setShowLoginForm(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             🚪 Sair
           </button>
         </div>
