@@ -416,22 +416,23 @@ function StatusBtns({ current, onSelect, compact }) {
    FORMULÁRIO PÚBLICO DE JUSTIFICATIVA
 ───────────────────────────────────────────── */
 function PublicJustForm({ employees, justificativas, saveJustificativas }) {
-  const [pubForm, setPubForm] = useState({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
+  const [pubForm, setPubForm] = useState({ empId: "", datas: "", motivo: "", documento: "" });
   const [pubError, setPubError] = useState("");
   const [pubSent, setPubSent] = useState(false);
 
+  const activeEmployees = employees.filter(e => e.active !== false);
+
   function handlePublicSubmit() {
-    if (!pubForm.nome.trim()) { setPubError("Informe seu nome completo."); return; }
-    if (!pubForm.cargo.trim()) { setPubError("Informe seu cargo."); return; }
+    if (!pubForm.empId) { setPubError("Selecione seu nome na lista."); return; }
     if (!pubForm.datas.trim()) { setPubError("Informe a(s) data(s) de ausência."); return; }
     if (!pubForm.motivo.trim()) { setPubError("Informe o motivo."); return; }
     setPubError("");
-    const empMatch = employees.find(e => e.name.toLowerCase().includes(pubForm.nome.trim().toLowerCase()));
+    const emp = employees.find(e => e.id === Number(pubForm.empId));
     const nova = {
       id: Date.now(),
-      empId: empMatch ? empMatch.id : null,
-      nomeManual: pubForm.nome.trim(),
-      cargo: pubForm.cargo.trim(),
+      empId: Number(pubForm.empId),
+      nomeManual: emp ? emp.name : "",
+      cargo: emp ? emp.role : "",
       datas: pubForm.datas.trim(),
       motivo: pubForm.motivo.trim(),
       documento: pubForm.documento.trim(),
@@ -440,7 +441,7 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
     };
     saveJustificativas([...justificativas, nova]);
     setPubSent(true);
-    setPubForm({ nome: "", cargo: "", datas: "", motivo: "", documento: "" });
+    setPubForm({ empId: "", datas: "", motivo: "", documento: "" });
   }
 
   const inputStyle = { width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" };
@@ -455,18 +456,37 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
     </div>
   );
 
+  const selectedEmp = employees.find(e => e.id === Number(pubForm.empId));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {[
-        { label: "Nome Completo", key: "nome", placeholder: "Seu nome completo", type: "text", required: true },
-        { label: "Função / Cargo", key: "cargo", placeholder: "Seu cargo na escola", type: "text", required: true },
-        { label: "Data(s) da Ausência", key: "datas", placeholder: "Ex: 28/02/2026 ou 28/02, 01/03/2026", type: "text", required: true },
-      ].map(({ label, key, placeholder, type, required }) => (
-        <div key={key}>
-          <label style={labelStyle}>{label}{required && <span style={{ color: "#ef4444" }}> *</span>}</label>
-          <input type={type} value={pubForm[key]} onChange={e => setPubForm(f => ({ ...f, [key]: e.target.value }))} placeholder={placeholder} style={inputStyle} />
+      {/* Seleção do funcionário por dropdown */}
+      <div>
+        <label style={labelStyle}>Seu Nome <span style={{ color: "#ef4444" }}>*</span></label>
+        <select
+          value={pubForm.empId}
+          onChange={e => setPubForm(f => ({ ...f, empId: e.target.value }))}
+          style={{ ...inputStyle, cursor: "pointer", appearance: "none" }}
+        >
+          <option value="">— Selecione seu nome —</option>
+          {activeEmployees.map(e => (
+            <option key={e.id} value={e.id}>{e.name} — {e.role}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Mostra o cargo automaticamente após selecionar */}
+      {selectedEmp && (
+        <div style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#a5b4fc", display: "flex", gap: 8, alignItems: "center" }}>
+          👤 <strong>{selectedEmp.name}</strong> — {selectedEmp.role}
         </div>
-      ))}
+      )}
+
+      <div>
+        <label style={labelStyle}>Data(s) da Ausência <span style={{ color: "#ef4444" }}>*</span></label>
+        <input type="text" value={pubForm.datas} onChange={e => setPubForm(f => ({ ...f, datas: e.target.value }))} placeholder="Ex: 28/02/2026 ou 28/02, 01/03/2026" style={inputStyle} />
+      </div>
+
       <div>
         <label style={labelStyle}>Motivo da Ausência <span style={{ color: "#ef4444" }}>*</span></label>
         <textarea value={pubForm.motivo} onChange={e => setPubForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Descreva o motivo da ausência com detalhes..." rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: "sans-serif" }} />
