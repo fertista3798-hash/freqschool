@@ -287,49 +287,35 @@ function buildWhatsAppMessage(emp, records, date, school) {
   const dayOfWeek = DAYS_PT[new Date(date + "T12:00:00").getDay()];
 
   let lines = [];
-  lines.push(`📋 *REGISTRO DE FREQUÊNCIA*`);
-  lines.push(`🏫 *${school.name || "FreqSchool"}*`);
-  if (school.city) lines.push(`📍 ${school.city}`);
+  lines.push(`📋 *${school.name || "FreqSchool"}* — ${dayOfWeek}, ${dateLabel}`);
+  lines.push(`👤 ${emp.name} (${emp.role})`);
   lines.push(``);
-  lines.push(`👤 *${emp.name}*`);
-  lines.push(`💼 ${emp.role}`);
-  lines.push(``);
-  lines.push(`📅 *${dayOfWeek}, ${dateLabel}*`);
-  lines.push(`─────────────────`);
 
-  const LINK_JUSTIFICATIVA = "https://forms.gle/h4hUwBNVJv7hRzSF7";
+  const LINK_JUSTIFICATIVA = window.location.origin + window.location.pathname;
   let temFalta = false;
 
   if (apoio) {
     TURNOS.forEach(turno => {
       const s   = records[recordKey(date, emp.id, turno)] || null;
       const cfg = s ? STATUS_CONFIG[s] : null;
-      const turnoLabel = turno === "manha" ? "☀️ Manhã" : "🌙 Tarde";
-      lines.push(`${turnoLabel}: ${cfg ? `${cfg.icon} *${cfg.label}*` : "➖ Não registrado"}`);
+      const turnoLabel = turno === "manha" ? "Manhã" : "Tarde";
+      lines.push(`${turnoLabel}: ${cfg ? `${cfg.icon} ${cfg.label}` : "➖ Não registrado"}`);
       if (s === "ausente") temFalta = true;
     });
   } else {
     const s   = records[recordKey(date, emp.id)] || null;
     const cfg = s ? STATUS_CONFIG[s] : null;
-    lines.push(`Frequência: ${cfg ? `${cfg.icon} *${cfg.label}*` : "➖ Não registrado"}`);
+    lines.push(`Frequência: ${cfg ? `${cfg.icon} ${cfg.label}` : "➖ Não registrado"}`);
     if (s === "ausente") temFalta = true;
   }
 
-  lines.push(`─────────────────`);
-
   if (temFalta) {
     lines.push(``);
-    lines.push(`⚠️ *Foi registrada uma falta para você nesta data.*`);
-    lines.push(`Caso deseje justificar sua ausência, preencha o formulário abaixo:`);
-    lines.push(``);
-    lines.push(`📝 *Formulário de Justificativa:*`);
+    lines.push(`⚠️ Falta registrada. Para justificar acesse:`);
     lines.push(LINK_JUSTIFICATIVA);
-    lines.push(``);
-
-    lines.push(`─────────────────`);
   }
 
-  if (school.director) lines.push(`👩‍💼 Direção: ${school.director}`);
+  if (school.director) lines.push(`\n👩‍💼 ${school.director}`);
 
 
   return lines.join("\n");
@@ -506,6 +492,14 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
 
 export default function App() {
   const [authed, setAuthed]             = useState(false);
+
+  // Fix tela cheia no computador
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.innerHTML = `*, *::before, *::after { box-sizing: border-box; } html, body, #root { margin: 0; padding: 0; width: 100%; min-height: 100vh; }`;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
   const [showLoginForm, setShowLoginForm] = useState(false);
   const [loginUser, setLoginUser]       = useState("");
   const [loginPass, setLoginPass]       = useState("");
