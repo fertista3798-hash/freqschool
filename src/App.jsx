@@ -1323,18 +1323,39 @@ export default function App() {
 
         {tab === "justificativas" && (
           <div>
-            {/* Header */}
-            <div style={{ display: "flex", gap: 12, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 18, fontWeight: "bold" }}>📋 Justificativas</div>
-                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#64748b", marginTop: 2 }}>Gerencie as justificativas de ausência dos funcionários</div>
+
+            {/* ── Header com botão ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: "bold", marginBottom: 4 }}>📋 Justificativas</div>
+                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#64748b" }}>Gerencie as justificativas de ausência dos funcionários</div>
               </div>
-              <button onClick={() => { setJustForm({ empId: "", datas: "", motivo: "", documento: "" }); setJustError(""); setShowJustModal(true); }} style={{ padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", boxShadow: "0 4px 15px rgba(99,102,241,0.4)", whiteSpace: "nowrap" }}>
+              <button onClick={() => { setJustForm({ empId: "", datas: "", motivo: "", documento: "" }); setJustError(""); setShowJustModal(true); }} style={{ padding: "11px 22px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", boxShadow: "0 4px 15px rgba(99,102,241,0.4)", whiteSpace: "nowrap" }}>
                 + Nova Justificativa
               </button>
             </div>
 
-            {/* Painel faltas sem justificativa */}
+            {/* ── Cards de resumo / filtros ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 20 }}>
+              {[
+                { val: "todas",     label: "Total",      color: "#6366f1", icon: "📋" },
+                { val: "pendente",  label: "Pendentes",  color: "#f59e0b", icon: "⏳" },
+                { val: "aprovada",  label: "Aprovadas",  color: "#22c55e", icon: "✅" },
+                { val: "reprovada", label: "Reprovadas", color: "#ef4444", icon: "❌" },
+              ].map(({ val, label, color, icon }) => {
+                const count = val === "todas" ? justificativas.length : justificativas.filter(j => j.status === val).length;
+                const active = justFilter === val;
+                return (
+                  <button key={val} onClick={() => setJustFilter(val)} style={{ background: active ? `${color}20` : "rgba(255,255,255,0.03)", border: `1px solid ${active ? color + "60" : "rgba(255,255,255,0.08)"}`, borderRadius: 14, padding: "14px 16px", cursor: "pointer", textAlign: "left", transition: "all 0.2s", outline: "none" }}>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
+                    <div style={{ fontFamily: "sans-serif", fontSize: 24, fontWeight: 900, color: active ? color : "#f1f5f9", lineHeight: 1 }}>{count}</div>
+                    <div style={{ fontFamily: "sans-serif", fontSize: 11, color: active ? color : "#64748b", marginTop: 4, fontWeight: 600 }}>{label}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ── Alerta: faltas sem justificativa ── */}
             {(() => {
               const semJust = activeEmployees.filter(emp => {
                 const temFalta = Object.entries(records).some(([k, v]) => {
@@ -1347,8 +1368,8 @@ export default function App() {
               });
               if (semJust.length === 0) return null;
               return (
-                <div style={{ marginBottom: 20, borderRadius: 14, background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.3)", padding: "14px 18px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <div style={{ marginBottom: 20, borderRadius: 14, background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.3)", padding: "16px 18px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                     <span style={{ fontSize: 18 }}>⚠️</span>
                     <span style={{ fontFamily: "sans-serif", fontSize: 13, fontWeight: 700, color: "#fcd34d" }}>
                       {semJust.length} funcionário{semJust.length > 1 ? "s" : ""} com falta{semJust.length > 1 ? "s" : ""} sem justificativa
@@ -1370,75 +1391,69 @@ export default function App() {
               );
             })()}
 
-            {/* Filtros */}
-            <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20, flexWrap: "wrap" }}>
-              {[["todas","Todas"],["pendente","⏳ Pendentes"],["aprovada","✅ Aprovadas"],["reprovada","❌ Reprovadas"]].map(([val, label]) => {
-                const count = val === "todas" ? justificativas.length : justificativas.filter(j => j.status === val).length;
-                return (
-                  <button key={val} onClick={() => setJustFilter(val)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 12, fontWeight: 600, transition: "all 0.2s", background: justFilter === val ? "#6366f1" : "transparent", color: justFilter === val ? "#fff" : "#94a3b8" }}>
-                    {label} <span style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "1px 7px", fontSize: 11 }}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Lista */}
+            {/* ── Lista de justificativas ── */}
             {justificativas.filter(j => justFilter === "todas" || j.status === justFilter).length === 0 ? (
               <div style={{ textAlign: "center", padding: "60px 20px", color: "#475569", fontFamily: "sans-serif" }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
                 <div>Nenhuma justificativa {justFilter !== "todas" ? justFilter : "registrada"} ainda.</div>
               </div>
             ) : (
-              <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gap: 10 }}>
                 {justificativas
                   .filter(j => justFilter === "todas" || j.status === justFilter)
                   .sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm))
                   .map(just => {
                     const emp = employees.find(e => e.id === just.empId);
                     const statusCfg = {
-                      pendente:  { label: "Pendente",  color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.3)",  icon: "⏳" },
-                      aprovada:  { label: "Aprovada",  color: "#22c55e", bg: "rgba(34,197,94,0.1)",   border: "rgba(34,197,94,0.3)",   icon: "✅" },
-                      reprovada: { label: "Reprovada", color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)",   icon: "❌" },
+                      pendente:  { label: "Pendente",  color: "#f59e0b", bg: "rgba(245,158,11,0.06)",  border: "rgba(245,158,11,0.25)",  icon: "⏳" },
+                      aprovada:  { label: "Aprovada",  color: "#22c55e", bg: "rgba(34,197,94,0.06)",   border: "rgba(34,197,94,0.25)",   icon: "✅" },
+                      reprovada: { label: "Reprovada", color: "#ef4444", bg: "rgba(239,68,68,0.06)",   border: "rgba(239,68,68,0.25)",   icon: "❌" },
                     }[just.status];
                     const dataRegistro = new Date(just.criadoEm).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
                     return (
-                      <div key={just.id} style={{ background: statusCfg.bg, border: `1px solid ${statusCfg.border}`, borderRadius: 16, padding: "18px 20px", transition: "all 0.2s" }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
-                          <div style={{ width: 44, height: 44, borderRadius: "50%", background: emp ? avatarColor(emp.id) : "#334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: "bold", flexShrink: 0 }}>
+                      <div key={just.id} style={{ background: statusCfg.bg, border: `1px solid ${statusCfg.border}`, borderRadius: 16, overflow: "hidden", transition: "all 0.2s" }}>
+
+                        {/* Topo: identidade + status */}
+                        <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, borderBottom: `1px solid ${statusCfg.border}` }}>
+                          <div style={{ width: 42, height: 42, borderRadius: "50%", background: emp ? avatarColor(emp.id) : "#334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: "bold", flexShrink: 0 }}>
                             {emp ? getInitials(emp.name) : "?"}
                           </div>
-                          <div style={{ flex: 1, minWidth: 200 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-                              <span style={{ fontSize: 15, fontWeight: 700 }}>{emp ? emp.name : "Funcionário removido"}</span>
-                              <span style={{ fontFamily: "sans-serif", fontSize: 11, background: `${statusCfg.color}25`, color: statusCfg.color, borderRadius: 6, padding: "2px 9px", fontWeight: 700 }}>{statusCfg.icon} {statusCfg.label}</span>
-                            </div>
-                            {emp && <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>{emp.role}</div>}
-                            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontFamily: "sans-serif", fontSize: 13 }}>
-                              <span style={{ color: "#64748b", fontWeight: 600 }}>📅 Data(s):</span>
-                              <span style={{ color: "#e2e8f0" }}>{just.datas}</span>
-                              <span style={{ color: "#64748b", fontWeight: 600 }}>📝 Motivo:</span>
-                              <span style={{ color: "#e2e8f0" }}>{just.motivo}</span>
-                              {just.documento && (<>
-                                <span style={{ color: "#64748b", fontWeight: 600 }}>📎 Doc:</span>
-                                <a href={just.documento} target="_blank" rel="noreferrer" style={{ color: "#a5b4fc", fontSize: 12 }}>Ver documento</a>
-                              </>)}
-                              {just.motivoReprovacao && (<>
-                                <span style={{ color: "#f87171", fontWeight: 600 }}>❌ Reprovado:</span>
-                                <span style={{ color: "#fca5a5" }}>{just.motivoReprovacao}</span>
-                              </>)}
-                            </div>
-                            <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#475569", marginTop: 8 }}>Registrado em: {dataRegistro}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{emp ? emp.name : "Funcionário removido"}</div>
+                            {emp && <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8" }}>{emp.role}</div>}
                           </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-                            {just.status === "pendente" && (<>
-                              <button onClick={() => aprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>✅ Aprovar{emp?.phone ? " + 📲" : ""}</button>
-                              <button onClick={() => reprovarJustificativa(just)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#ef4444", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>❌ Reprovar{emp?.phone ? " + 📲" : ""}</button>
-                            </>)}
-                            {just.status !== "pendente" && (
-                              <button onClick={() => { const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "pendente" } : j); saveJustificativas(updated); showToast("Reaberta para análise."); }} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>↩ Reabrir</button>
-                            )}
-                            <button onClick={() => removerJustificativa(just.id)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(100,116,139,0.15)", color: "#94a3b8", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>🗑️ Remover</button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <span style={{ fontFamily: "sans-serif", fontSize: 11, background: `${statusCfg.color}25`, color: statusCfg.color, borderRadius: 20, padding: "3px 10px", fontWeight: 700, whiteSpace: "nowrap" }}>{statusCfg.icon} {statusCfg.label}</span>
+                            <span style={{ fontFamily: "sans-serif", fontSize: 11, color: "#475569" }}>{dataRegistro}</span>
                           </div>
+                        </div>
+
+                        {/* Corpo: datas + motivo */}
+                        <div style={{ padding: "12px 18px", display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 14px", fontFamily: "sans-serif", fontSize: 13, alignItems: "start" }}>
+                          <span style={{ color: "#64748b", fontWeight: 600, whiteSpace: "nowrap" }}>📅 Data(s)</span>
+                          <span style={{ color: "#e2e8f0" }}>{just.datas}</span>
+                          <span style={{ color: "#64748b", fontWeight: 600, whiteSpace: "nowrap" }}>📝 Motivo</span>
+                          <span style={{ color: "#cbd5e1" }}>{just.motivo}</span>
+                          {just.documento && (<>
+                            <span style={{ color: "#64748b", fontWeight: 600 }}>📎 Doc</span>
+                            <a href={just.documento} target="_blank" rel="noreferrer" style={{ color: "#a5b4fc", textDecoration: "underline" }}>Ver documento</a>
+                          </>)}
+                          {just.motivoReprovacao && (<>
+                            <span style={{ color: "#f87171", fontWeight: 600 }}>❌ Reprovado</span>
+                            <span style={{ color: "#fca5a5" }}>{just.motivoReprovacao}</span>
+                          </>)}
+                        </div>
+
+                        {/* Rodapé: ações */}
+                        <div style={{ padding: "10px 18px", background: "rgba(0,0,0,0.12)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          {just.status === "pendente" && (<>
+                            <button onClick={() => aprovarJustificativa(just)} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(34,197,94,0.2)", color: "#22c55e", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>✅ Aprovar{emp?.phone ? " + 📲" : ""}</button>
+                            <button onClick={() => reprovarJustificativa(just)} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#ef4444", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>❌ Reprovar{emp?.phone ? " + 📲" : ""}</button>
+                          </>)}
+                          {just.status !== "pendente" && (
+                            <button onClick={() => { const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "pendente" } : j); saveJustificativas(updated); showToast("Reaberta para análise."); }} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>↩ Reabrir</button>
+                          )}
+                          <button onClick={() => removerJustificativa(just.id)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(100,116,139,0.1)", color: "#64748b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700 }}>🗑️</button>
                         </div>
                       </div>
                     );
@@ -1446,7 +1461,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Modal Nova Justificativa */}
+                        {/* Modal Nova Justificativa */}
             {showJustModal && (
               <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
                 <div onClick={() => setShowJustModal(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(5px)" }} />
