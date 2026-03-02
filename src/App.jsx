@@ -506,7 +506,13 @@ export default function App() {
   const [loginError, setLoginError]     = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [credentials, setCredentials]   = useState({ user: "admin", pass: "escola123" });
+  const [currentUser, setCurrentUser]   = useState(null);
+  const [systemUsers, setSystemUsers]   = useState([]);
   const [showChangeCreds, setShowChangeCreds] = useState(false);
+  const [userForm, setUserForm]         = useState({ name: "", user: "", pass: "", pass2: "", role: "Coordenador", permissions: { registro: true, relatorio: false, justificativas: false, cadastro: false, escola: false } });
+  const [editingUser, setEditingUser]   = useState(null);
+  const [userFormError, setUserFormError] = useState("");
+  const [showUserModal, setShowUserModal] = useState(false);
   const [newUser, setNewUser]       = useState("");
   const [newPass, setNewPass]       = useState("");
   const [newPass2, setNewPass2]     = useState("");
@@ -577,7 +583,11 @@ export default function App() {
     const unsubJust = onSnapshot(doc(db, "config", "justificativas"), (snap) => {
       if (snap.exists()) setJustificativas(snap.data().list || []);
     });
-    return () => { unsubSchool(); unsubEmps(); unsubRecs(); unsubCreds(); unsubJust(); };
+    // System Users
+    const unsubUsers = onSnapshot(doc(db, "config", "systemUsers"), (snap) => {
+      if (snap.exists()) setSystemUsers(snap.data().list || []);
+    });
+    return () => { unsubSchool(); unsubEmps(); unsubRecs(); unsubCreds(); unsubJust(); unsubUsers(); };
   }, []);
 
   const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          } catch(e) { console.error("erro escola:", e); } };
@@ -589,6 +599,15 @@ export default function App() {
     setJustificativas(list);
     try { await setDoc(doc(db, "config", "justificativas"), { list }); } catch(e) { console.error("erro just:", e); }
   };
+
+  const saveSystemUsers = async (list) => {
+    setSystemUsers(list);
+    try { await setDoc(doc(db, "config", "systemUsers"), { list }); } catch(e) { console.error("erro users:", e); }
+  };
+
+  /* ── Helpers de permissão ── */
+  const isGestor = () => !currentUser || currentUser.role === "Gestor";
+  const can = (perm) => isGestor() || !!(currentUser?.permissions?.[perm]);
 
   /* ── Justificativas ── */
   function handleAddJustificativa() {
@@ -696,7 +715,19 @@ export default function App() {
     setLoginLoading(true);
     setLoginError("");
     setTimeout(() => {
+      // Check gestor (master)
       if (loginUser.trim() === credentials.user && loginPass === credentials.pass) {
+        setCurrentUser({ user: credentials.user, role: "Gestor", name: "Gestor", permissions: { registro: true, relatorio: true, justificativas: true, cadastro: true, escola: true } });
+        setAuthed(true);
+        setShowLoginForm(false);
+        setLoginError("");
+        setLoginLoading(false);
+        return;
+      }
+      // Check system users
+      const found = systemUsers.find(u => u.user.toLowerCase() === loginUser.trim().toLowerCase() && u.pass === loginPass);
+      if (found) {
+        setCurrentUser(found);
         setAuthed(true);
         setShowLoginForm(false);
         setLoginError("");
@@ -818,12 +849,13 @@ export default function App() {
   /* ── Styles ── */
   const card = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16 };
   const TABS = [
-    { id: "registro",       label: "📝 Registro" },
-    { id: "relatorio",      label: "📊 Relatório" },
-    { id: "cadastro",       label: "👥 Cadastro" },
-    { id: "justificativas", label: "📋 Justificativas", badge: justificativas.filter(j => j.status === "pendente").length },
-    { id: "escola",         label: "🏫 Escola" },
-  ];
+    can("registro")       && { id: "registro",       label: "📝 Registro" },
+    can("relatorio")      && { id: "relatorio",      label: "📊 Relatório" },
+    can("cadastro")       && { id: "cadastro",       label: "👥 Cadastro" },
+    can("justificativas") && { id: "justificativas", label: "📋 Justificativas", badge: justificativas.filter(j => j.status === "pendente").length },
+    can("escola")         && { id: "escola",         label: "🏫 Escola" },
+    isGestor()            && { id: "usuarios",       label: "👥 Usuários" },
+  ].filter(Boolean);
 
   /* ── WhatsApp send btn ── */
   const WaBtn = ({ emp }) => (
@@ -948,10 +980,19 @@ export default function App() {
           <button onClick={openSchoolModal} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#94a3b8", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             ✏️ Editar Escola
           </button>
-          <button onClick={() => { setShowChangeCreds(true); setNewUser(credentials.user); setNewPass(""); setNewPass2(""); setLoginError(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#94a3b8", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            🔑 Alterar Senha
-          </button>
-          <button onClick={() => { setAuthed(false); setShowLoginForm(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+          {currentUser && (
+            <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "5px 12px", fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ color: isGestor() ? "#a5b4fc" : "#22c55e", fontWeight: 700 }}>{isGestor() ? "👑" : "👤"}</span>
+              <span>{currentUser.name || currentUser.user}</span>
+              <span style={{ background: isGestor() ? "rgba(99,102,241,0.2)" : "rgba(34,197,94,0.15)", color: isGestor() ? "#a5b4fc" : "#22c55e", borderRadius: 5, padding: "1px 7px", fontSize: 10, fontWeight: 700 }}>{currentUser.role}</span>
+            </div>
+          )}
+          {isGestor() && (
+            <button onClick={() => { setShowChangeCreds(true); setNewUser(credentials.user); setNewPass(""); setNewPass2(""); setLoginError(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#94a3b8", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+              🔑 Alterar Senha
+            </button>
+          )}
+          <button onClick={() => { setAuthed(false); setCurrentUser(null); setShowLoginForm(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             🚪 Sair
           </button>
         </div>
@@ -1674,6 +1715,179 @@ export default function App() {
           </div>
         </div>
       )}
+
+        {/* ══════════ USUÁRIOS ══════════ */}
+        {tab === "usuarios" && isGestor() && (
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", marginBottom: 24 }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: "bold", marginBottom: 4 }}>👥 Gerenciar Usuários</div>
+                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#64748b" }}>Crie usuários e defina o que cada um pode acessar no sistema</div>
+              </div>
+              <button onClick={() => { setUserForm({ name: "", user: "", pass: "", pass2: "", role: "Coordenador", permissions: { registro: true, relatorio: false, justificativas: false, cadastro: false, escola: false } }); setEditingUser(null); setUserFormError(""); setShowUserModal(true); }} style={{ padding: "11px 22px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", boxShadow: "0 4px 15px rgba(99,102,241,0.4)", whiteSpace: "nowrap" }}>
+                + Novo Usuário
+              </button>
+            </div>
+
+            {/* Gestor card */}
+            <div style={{ marginBottom: 10, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 16, overflow: "hidden" }}>
+              <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 42, height: 42, borderRadius: "50%", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>👑</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{credentials.user}</div>
+                  <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8" }}>Login master do sistema</div>
+                </div>
+                <span style={{ fontFamily: "sans-serif", fontSize: 11, background: "rgba(99,102,241,0.25)", color: "#a5b4fc", borderRadius: 20, padding: "3px 12px", fontWeight: 700 }}>👑 Gestor</span>
+              </div>
+              <div style={{ padding: "8px 18px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {[["registro","📝 Registro"],["relatorio","📊 Relatório"],["justificativas","📋 Justificativas"],["cadastro","👥 Cadastro"],["escola","🏫 Escola"]].map(([k, label]) => (
+                  <span key={k} style={{ fontFamily: "sans-serif", fontSize: 11, background: "rgba(34,197,94,0.15)", color: "#22c55e", borderRadius: 6, padding: "2px 9px", fontWeight: 600 }}>✓ {label}</span>
+                ))}
+              </div>
+            </div>
+
+            {/* System users list */}
+            {systemUsers.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "50px 20px", color: "#475569", fontFamily: "sans-serif" }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>👤</div>
+                <div>Nenhum usuário criado ainda. Clique em <strong style={{ color: "#a5b4fc" }}>+ Novo Usuário</strong> para começar.</div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                {systemUsers.map(u => {
+                  const PERM_LABELS = { registro: "📝 Registro", relatorio: "📊 Relatório", justificativas: "📋 Justificativas", cadastro: "👥 Cadastro", escola: "🏫 Escola" };
+                  const activePerms = Object.entries(u.permissions || {}).filter(([, v]) => v);
+                  return (
+                    <div key={u.id} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden" }}>
+                      <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ width: 42, height: 42, borderRadius: "50%", background: avatarColor(u.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: "bold", flexShrink: 0 }}>{getInitials(u.name || u.user)}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>{u.name || u.user}</div>
+                          <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8" }}>@{u.user} · {u.role}</div>
+                        </div>
+                        <span style={{ fontFamily: "sans-serif", fontSize: 11, background: u.role === "Coordenador" ? "rgba(99,102,241,0.2)" : "rgba(20,184,166,0.2)", color: u.role === "Coordenador" ? "#a5b4fc" : "#2dd4bf", borderRadius: 20, padding: "3px 12px", fontWeight: 700, flexShrink: 0 }}>{u.role}</span>
+                      </div>
+                      <div style={{ padding: "10px 18px", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                        {activePerms.length === 0
+                          ? <span style={{ fontFamily: "sans-serif", fontSize: 11, color: "#475569" }}>Sem permissões ativas</span>
+                          : activePerms.map(([k]) => (
+                              <span key={k} style={{ fontFamily: "sans-serif", fontSize: 11, background: "rgba(34,197,94,0.12)", color: "#22c55e", borderRadius: 6, padding: "2px 9px", fontWeight: 600 }}>✓ {PERM_LABELS[k]}</span>
+                            ))}
+                        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                          <button onClick={() => { setEditingUser(u); setUserForm({ name: u.name || "", user: u.user, pass: "", pass2: "", role: u.role, permissions: { ...u.permissions } }); setUserFormError(""); setShowUserModal(true); }} style={{ padding: "5px 12px", borderRadius: 7, border: "none", cursor: "pointer", background: "rgba(99,102,241,0.15)", color: "#a5b4fc", fontSize: 12, fontFamily: "sans-serif", fontWeight: 600 }}>✏️ Editar</button>
+                          <button onClick={() => { saveSystemUsers(systemUsers.filter(x => x.id !== u.id)); showToast("Usuário removido."); }} style={{ padding: "5px 12px", borderRadius: 7, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.12)", color: "#f87171", fontSize: 12, fontFamily: "sans-serif", fontWeight: 600 }}>🗑️</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Modal criar/editar usuário */}
+            {showUserModal && (
+              <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                <div onClick={() => setShowUserModal(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(5px)" }} />
+                <div style={{ position: "relative", width: "100%", maxWidth: 500, background: "#1a2640", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 20, padding: "28px 26px 24px", boxShadow: "0 25px 60px rgba(0,0,0,0.6)", maxHeight: "90vh", overflowY: "auto" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+                    <div style={{ fontSize: 17, fontWeight: "bold" }}>{editingUser ? "✏️ Editar Usuário" : "👤 Novo Usuário"}</div>
+                    <button onClick={() => setShowUserModal(false)} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, fontFamily: "sans-serif" }}>
+                    {/* Nome e usuário */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Nome *</label>
+                        <input value={userForm.name} onChange={e => setUserForm(f => ({...f, name: e.target.value}))} placeholder="Nome completo" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Usuário (login) *</label>
+                        <input value={userForm.user} onChange={e => setUserForm(f => ({...f, user: e.target.value}))} placeholder="ex: coord.ana" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      </div>
+                    </div>
+
+                    {/* Perfil */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Perfil *</label>
+                      <select value={userForm.role} onChange={e => setUserForm(f => ({...f, role: e.target.value}))} style={{ width: "100%", background: "#1e293b", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", cursor: "pointer" }}>
+                        <option value="Coordenador">Coordenador</option>
+                        <option value="Secretário(a)">Secretário(a)</option>
+                      </select>
+                    </div>
+
+                    {/* Senha */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>{editingUser ? "Nova Senha" : "Senha *"}</label>
+                        <input type="password" value={userForm.pass} onChange={e => setUserForm(f => ({...f, pass: e.target.value}))} placeholder={editingUser ? "Deixe vazio para manter" : "Mínimo 6 caracteres"} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Confirmar</label>
+                        <input type="password" value={userForm.pass2} onChange={e => setUserForm(f => ({...f, pass2: e.target.value}))} placeholder="Repita a senha" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      </div>
+                    </div>
+
+                    {/* Permissões */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 10 }}>🔐 Permissões de Acesso</label>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {[
+                          { key: "registro",       icon: "📝", label: "Lançar Presença",       desc: "Pode registrar frequência dos funcionários" },
+                          { key: "relatorio",      icon: "📊", label: "Ver Relatórios",         desc: "Acesso à aba de relatórios e exportação PDF" },
+                          { key: "justificativas", icon: "📋", label: "Gerenciar Justificativas",desc: "Pode aprovar e reprovar justificativas" },
+                          { key: "cadastro",       icon: "👥", label: "Cadastrar Funcionários", desc: "Pode adicionar, editar e remover funcionários" },
+                          { key: "escola",         icon: "🏫", label: "Editar Dados da Escola", desc: "Pode editar nome, cidade e informações da escola" },
+                        ].map(({ key, icon, label, desc }) => {
+                          const active = userForm.permissions[key];
+                          return (
+                            <div key={key} onClick={() => setUserForm(f => ({...f, permissions: {...f.permissions, [key]: !f.permissions[key]}}))} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, cursor: "pointer", background: active ? "rgba(99,102,241,0.12)" : "rgba(255,255,255,0.04)", border: `1px solid ${active ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.08)"}`, transition: "all 0.15s" }}>
+                              <div style={{ width: 36, height: 36, borderRadius: 8, background: active ? "rgba(99,102,241,0.2)" : "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{icon}</div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: active ? "#e2e8f0" : "#94a3b8" }}>{label}</div>
+                                <div style={{ fontSize: 11, color: "#475569", marginTop: 1 }}>{desc}</div>
+                              </div>
+                              <div style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${active ? "#6366f1" : "#334155"}`, background: active ? "#6366f1" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
+                                {active && <span style={{ color: "#fff", fontSize: 12, lineHeight: 1 }}>✓</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {userFormError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>⚠️ {userFormError}</div>}
+
+                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                      <button onClick={() => setShowUserModal(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
+                      <button onClick={() => {
+                        if (!userForm.name.trim()) { setUserFormError("Informe o nome."); return; }
+                        if (!userForm.user.trim()) { setUserFormError("Informe o usuário de login."); return; }
+                        if (!editingUser && userForm.pass.length < 6) { setUserFormError("A senha deve ter pelo menos 6 caracteres."); return; }
+                        if (userForm.pass && userForm.pass !== userForm.pass2) { setUserFormError("As senhas não coincidem."); return; }
+                        const conflict = systemUsers.find(u => u.user.toLowerCase() === userForm.user.trim().toLowerCase() && (!editingUser || u.id !== editingUser.id));
+                        if (conflict) { setUserFormError("Esse usuário de login já existe."); return; }
+                        if (userForm.user.trim().toLowerCase() === credentials.user.toLowerCase()) { setUserFormError("Esse usuário já pertence ao Gestor."); return; }
+                        setUserFormError("");
+                        if (editingUser) {
+                          const updated = systemUsers.map(u => u.id === editingUser.id ? { ...u, name: userForm.name.trim(), user: userForm.user.trim(), role: userForm.role, permissions: userForm.permissions, ...(userForm.pass ? { pass: userForm.pass } : {}) } : u);
+                          saveSystemUsers(updated);
+                          showToast("Usuário atualizado!");
+                        } else {
+                          saveSystemUsers([...systemUsers, { id: Date.now(), name: userForm.name.trim(), user: userForm.user.trim(), pass: userForm.pass, role: userForm.role, permissions: userForm.permissions }]);
+                          showToast("Usuário criado!");
+                        }
+                        setShowUserModal(false);
+                      }} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)" }}>
+                        {editingUser ? "💾 Salvar Alterações" : "✓ Criar Usuário"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
       {/* ══ MODAL EDITAR ESCOLA ══ */}
       {showSchoolModal && (
