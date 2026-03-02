@@ -297,37 +297,20 @@ function buildWhatsAppMessage(emp, records, date, school) {
   lines.push(`📅 *${dayOfWeek}, ${dateLabel}*`);
   lines.push(`─────────────────`);
 
-  const LINK_JUSTIFICATIVA = "https://forms.gle/h4hUwBNVJv7hRzSF7";
-  let temFalta = false;
-
   if (apoio) {
     TURNOS.forEach(turno => {
       const s   = records[recordKey(date, emp.id, turno)] || null;
       const cfg = s ? STATUS_CONFIG[s] : null;
       const turnoLabel = turno === "manha" ? "☀️ Manhã" : "🌙 Tarde";
       lines.push(`${turnoLabel}: ${cfg ? `${cfg.icon} *${cfg.label}*` : "➖ Não registrado"}`);
-      if (s === "ausente") temFalta = true;
     });
   } else {
     const s   = records[recordKey(date, emp.id)] || null;
     const cfg = s ? STATUS_CONFIG[s] : null;
     lines.push(`Frequência: ${cfg ? `${cfg.icon} *${cfg.label}*` : "➖ Não registrado"}`);
-    if (s === "ausente") temFalta = true;
   }
 
   lines.push(`─────────────────`);
-
-  if (temFalta) {
-    lines.push(``);
-    lines.push(`⚠️ *Foi registrada uma falta para você nesta data.*`);
-    lines.push(`Caso deseje justificar sua ausência, preencha o formulário abaixo:`);
-    lines.push(``);
-    lines.push(`📝 *Formulário de Justificativa:*`);
-    lines.push(LINK_JUSTIFICATIVA);
-    lines.push(``);
-
-    lines.push(`─────────────────`);
-  }
 
   if (school.director) lines.push(`👩‍💼 Direção: ${school.director}`);
 
