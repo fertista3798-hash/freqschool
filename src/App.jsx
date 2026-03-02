@@ -611,9 +611,9 @@ export default function App() {
       } else { dateKey = dataStr; }
       if (!dateKey) return;
       if (emp && IS_APOIO(emp.role)) {
-        TURNOS.forEach(t => { const k = recordKey(dateKey, just.empId, t); if (newRecords[k] === "ausente") newRecords[k] = "justificado"; });
+        TURNOS.forEach(t => { const k = recordKey(dateKey, just.empId, t); newRecords[k] = "justificado"; });
       } else {
-        const k = recordKey(dateKey, just.empId); if (newRecords[k] === "ausente") newRecords[k] = "justificado";
+        const k = recordKey(dateKey, just.empId); newRecords[k] = "justificado";
       }
     });
     saveRecords(newRecords);
