@@ -297,7 +297,6 @@ function buildWhatsAppMessage(emp, records, date, school) {
   lines.push(`📅 *${dayOfWeek}, ${dateLabel}*`);
   lines.push(`─────────────────`);
 
-  const LINK_JUSTIFICATIVA = "https://forms.gle/h4hUwBNVJv7hRzSF7";
   let temFalta = false;
 
   if (apoio) {
@@ -320,12 +319,11 @@ function buildWhatsAppMessage(emp, records, date, school) {
   if (temFalta) {
     lines.push(``);
     lines.push(`⚠️ *Foi registrada uma falta para você nesta data.*`);
-    lines.push(`Caso deseje justificar sua ausência, preencha o formulário abaixo:`);
+    lines.push(`Caso deseje justificar sua ausência, acesse o formulário pelo link abaixo:`);
     lines.push(``);
     lines.push(`📝 *Formulário de Justificativa:*`);
-    lines.push(LINK_JUSTIFICATIVA);
+    lines.push(window.location.origin);
     lines.push(``);
-
     lines.push(`─────────────────`);
   }
 
@@ -343,7 +341,6 @@ function buildWhatsAppRelatorioSemanal(emp, records, reportDates, school) {
   const DS = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
   const fmtD = (s) => { const [,mm,dd] = s.split("-"); return `${dd}/${mm}`; };
   const abbr = { presente: "✅ Presente", ausente: "❌ Ausente", justificado: "⚠️ Justificado", folga: "🔵 Folga" };
-
   const dataInicio = fmtD(reportDates[0]);
   const dataFim    = fmtD(reportDates[reportDates.length - 1]);
 
@@ -388,15 +385,11 @@ function buildWhatsAppRelatorioSemanal(emp, records, reportDates, school) {
   lines.push(``);
   lines.push(`📈 *RESUMO DA SEMANA*`);
   lines.push(`✅ Presente: ${totalPresente}`);
-  if (totalAusente > 0)    lines.push(`❌ Ausente: ${totalAusente}`);
-  if (totalJust > 0)       lines.push(`⚠️ Justificado: ${totalJust}`);
-  if (totalFolga > 0)      lines.push(`🔵 Folga: ${totalFolga}`);
-
+  if (totalAusente > 0)  lines.push(`❌ Ausente: ${totalAusente}`);
+  if (totalJust > 0)     lines.push(`⚠️ Justificado: ${totalJust}`);
+  if (totalFolga > 0)    lines.push(`🔵 Folga: ${totalFolga}`);
   const total = totalPresente + totalAusente + totalJust + totalFolga;
-  if (total > 0) {
-    const pct = Math.round((totalPresente / total) * 100);
-    lines.push(`📊 % Presença: *${pct}%*`);
-  }
+  if (total > 0) lines.push(`📊 % Presença: *${Math.round((totalPresente / total) * 100)}%*`);
 
   if (totalAusente > 0) {
     lines.push(``);
@@ -408,7 +401,6 @@ function buildWhatsAppRelatorioSemanal(emp, records, reportDates, school) {
   lines.push(``);
   lines.push(`─────────────────`);
   if (school.director) lines.push(`👩‍💼 Direção: ${school.director}`);
-
   return lines.join("\n");
 }
 
@@ -603,19 +595,14 @@ export default function App() {
   const logoInputRef                          = useRef();
 
   // WhatsApp modal
-  const [waModal, setWaModal]   = useState(null); // emp object
-  const [waPhone, setWaPhone]   = useState("");   // número editável no modal
+  const [waModal, setWaModal]   = useState(null);
+  const [waPhone, setWaPhone]   = useState("");
   const [waSent, setWaSent]     = useState(false);
 
-  // WhatsApp automático ao registrar
-  const [showAutoWa, setShowAutoWa]       = useState(false);
-  const [autoWaRecords, setAutoWaRecords] = useState(null);
-
   // Relatório semanal por WhatsApp
-  const [sendingReport, setSendingReport]   = useState(false);
-  const [reportWaIndex, setReportWaIndex]   = useState(0);
-  const [showReportWa, setShowReportWa]     = useState(false);
-  const [reportWaQueue, setReportWaQueue]   = useState([]);
+  const [showReportWa, setShowReportWa]   = useState(false);
+  const [reportWaIndex, setReportWaIndex] = useState(0);
+  const [reportWaQueue, setReportWaQueue] = useState([]);
 
   // Toast
   const [toast, setToast] = useState({ msg: "", type: "ok" });
@@ -788,19 +775,7 @@ export default function App() {
   const toggleActive = (id) => saveEmployees(employees.map(e => e.id === id ? { ...e, active: !e.active } : e));
 
   /* ── Registro ── */
-  const setStatus = (empId, status, turno = null) => {
-    const newRecords = { ...records, [recordKey(selectedDate, empId, turno)]: status };
-    saveRecords(newRecords);
-    // Abre modal WhatsApp automaticamente se funcionário tem telefone
-    const emp = employees.find(e => e.id === empId);
-    if (emp && emp.phone) {
-      setWaModal(emp);
-      setWaPhone(emp.phone);
-      setWaSent(false);
-      setAutoWaRecords(newRecords);
-      setShowAutoWa(true);
-    }
-  };
+  const setStatus   = (empId, status, turno = null) => saveRecords({ ...records, [recordKey(selectedDate, empId, turno)]: status });
   const getStatus   = (empId, date = selectedDate, turno = null) => records[recordKey(date, empId, turno)] || null;
   const apoioFilled = (empId, date = selectedDate) => TURNOS.every(t => !!getStatus(empId, date, t));
 
@@ -828,10 +803,7 @@ export default function App() {
   /* ── Relatório Semanal por WhatsApp ── */
   function startReportWaQueue() {
     const queue = activeEmployees.filter(e => e.phone);
-    if (queue.length === 0) {
-      showToast("Nenhum funcionário ativo com telefone cadastrado.", "err");
-      return;
-    }
+    if (queue.length === 0) { showToast("Nenhum funcionário ativo com telefone cadastrado.", "err"); return; }
     setReportWaQueue(queue);
     setReportWaIndex(0);
     setShowReportWa(true);
@@ -1182,10 +1154,7 @@ export default function App() {
                 {pdfLoading ? "⏳ Gerando..." : "📄 Exportar PDF"}
               </button>
               {reportType === "semanal" && (
-                <button
-                  onClick={startReportWaQueue}
-                  style={{ padding:"9px 20px", borderRadius:10, border:"none", cursor:"pointer", background:"linear-gradient(135deg,#25d366,#128c7e)", color:"#fff", fontSize:13, fontWeight:700, fontFamily:"sans-serif", boxShadow:"0 4px 15px rgba(37,211,102,0.35)", display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}
-                >
+                <button onClick={startReportWaQueue} style={{ padding:"9px 20px", borderRadius:10, border:"none", cursor:"pointer", background:"linear-gradient(135deg,#25d366,#128c7e)", color:"#fff", fontSize:13, fontWeight:700, fontFamily:"sans-serif", boxShadow:"0 4px 15px rgba(37,211,102,0.35)", display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
                   Enviar Relatório por WhatsApp
                 </button>
@@ -1557,25 +1526,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Aviso de falta */}
-            {(() => {
-              const apoio = IS_APOIO(waModal.role);
-              const temFalta = apoio
-                ? TURNOS.some(t => getStatus(waModal.id, selectedDate, t) === "ausente")
-                : getStatus(waModal.id) === "ausente";
-              return temFalta ? (
-                <div style={{ marginBottom: 14, padding: "12px 16px", borderRadius: 12, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.35)", fontFamily: "sans-serif", fontSize: 13, color: "#fca5a5", display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>Falta registrada nesta data</div>
-                    <div style={{ fontSize: 12, color: "#f87171" }}>O link do formulário de justificativa será incluído automaticamente na mensagem.</div>
-                    <a href="https://forms.gle/h4hUwBNVJv7hRzSF7" target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 8, fontSize: 11, color: "#a5b4fc", textDecoration: "underline" }}>
-                      📝 Ver formulário de justificativa
-                    </a>
-                  </div>
-                </div>
-              ) : null;
-            })()}
+
 
             {/* Preview da mensagem */}
             <div style={{ marginBottom: 18, background: "#0d1929", borderRadius: 12, padding: "14px 16px", border: "1px solid rgba(255,255,255,0.07)" }}>
@@ -1758,50 +1709,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ══ MODAL AUTO WHATSAPP (registro de frequência) ══ */}
-      {showAutoWa && waModal && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={() => setShowAutoWa(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(5px)" }} />
-          <div style={{ position: "relative", width: "100%", maxWidth: 420, background: "#1a2640", border: "1px solid rgba(37,211,102,0.3)", borderRadius: 20, padding: "26px 24px", boxShadow: "0 25px 60px rgba(0,0,0,0.6)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: "bold", color: "#f1f5f9" }}>📲 Enviar Frequência por WhatsApp</div>
-                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#64748b", marginTop: 2 }}>Frequência registrada! Notifique o funcionário.</div>
-              </div>
-              <button onClick={() => setShowAutoWa(false)} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}>×</button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, padding: "10px 14px", background: "rgba(255,255,255,0.04)", borderRadius: 12 }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", background: avatarColor(waModal.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: "bold", flexShrink: 0 }}>{getInitials(waModal.name)}</div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{waModal.name}</div>
-                <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8" }}>{waModal.role}</div>
-              </div>
-            </div>
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Número do WhatsApp</label>
-              <input type="tel" value={waPhone} onChange={e => setWaPhone(e.target.value)} placeholder="(00) 00000-0000"
-                style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(37,211,102,0.3)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, fontFamily: "sans-serif", outline: "none" }} />
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setShowAutoWa(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, fontFamily: "sans-serif", cursor: "pointer" }}>Agora não</button>
-              <button
-                onClick={() => {
-                  if (!waPhone || cleanPhone(waPhone).length < 10) { showToast("Número inválido.", "err"); return; }
-                  const msg = buildWhatsAppMessage(waModal, autoWaRecords || records, selectedDate, school);
-                  sendWhatsApp(waPhone, msg);
-                  if (!waModal.phone && waPhone) saveEmployees(employees.map(e => e.id === waModal.id ? { ...e, phone: waPhone } : e));
-                  setShowAutoWa(false);
-                  showToast("Mensagem aberta no WhatsApp!");
-                }}
-                style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#25d366,#128c7e)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", cursor: "pointer", boxShadow: "0 4px 15px rgba(37,211,102,0.4)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                Enviar WhatsApp
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ══ MODAL RELATÓRIO SEMANAL POR WHATSAPP ══ */}
       {showReportWa && reportWaQueue.length > 0 && (
         <div style={{ position: "fixed", inset: 0, zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -1814,18 +1721,15 @@ export default function App() {
               </div>
               <button onClick={() => setShowReportWa(false)} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.07)", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}>×</button>
             </div>
-
             {/* Progresso */}
             <div style={{ marginBottom: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
-                <span>Progresso</span>
-                <span>{reportWaIndex + 1} de {reportWaQueue.length}</span>
+                <span>Progresso</span><span>{reportWaIndex + 1} de {reportWaQueue.length}</span>
               </div>
               <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
                 <div style={{ height: "100%", background: "linear-gradient(90deg,#25d366,#128c7e)", borderRadius: 3, width: `${((reportWaIndex + 1) / reportWaQueue.length) * 100}%`, transition: "width 0.3s" }} />
               </div>
             </div>
-
             {/* Funcionário atual */}
             {(() => {
               const emp = reportWaQueue[reportWaIndex];
@@ -1842,29 +1746,25 @@ export default function App() {
                 </div>
               );
             })()}
-
-            {/* Lista restante */}
+            {/* Próximos */}
             {reportWaQueue.length > 1 && (
-              <div style={{ marginBottom: 16, maxHeight: 100, overflowY: "auto" }}>
+              <div style={{ marginBottom: 16, maxHeight: 90, overflowY: "auto" }}>
                 {reportWaQueue.slice(reportWaIndex + 1, reportWaIndex + 4).map((e, i) => (
-                  <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", opacity: 0.5 + (i === 0 ? 0.2 : 0) }}>
-                    <div style={{ width: 26, height: 26, borderRadius: "50%", background: avatarColor(e.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: "bold" }}>{getInitials(e.name)}</div>
-                    <span style={{ fontFamily: "sans-serif", fontSize: 12, color: "#94a3b8" }}>{e.name}</span>
+                  <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", opacity: 0.45 }}>
+                    <div style={{ width: 24, height: 24, borderRadius: "50%", background: avatarColor(e.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: "bold" }}>{getInitials(e.name)}</div>
+                    <span style={{ fontFamily: "sans-serif", fontSize: 12, color: "#64748b" }}>{e.name}</span>
                   </div>
                 ))}
                 {reportWaQueue.length - reportWaIndex - 1 > 3 && (
-                  <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#475569", paddingLeft: 34 }}>+{reportWaQueue.length - reportWaIndex - 4} mais...</div>
+                  <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#475569", paddingLeft: 32 }}>+{reportWaQueue.length - reportWaIndex - 4} mais...</div>
                 )}
               </div>
             )}
-
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setShowReportWa(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, fontFamily: "sans-serif", cursor: "pointer" }}>Cancelar</button>
-              <button
-                onClick={sendNextReportWa}
-                style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#25d366,#128c7e)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", cursor: "pointer", boxShadow: "0 4px 15px rgba(37,211,102,0.4)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                {reportWaIndex < reportWaQueue.length - 1 ? `Enviar para ${reportWaQueue[reportWaIndex].name.split(" ")[0]} →` : `✓ Enviar para ${reportWaQueue[reportWaIndex].name.split(" ")[0]}`}
+              <button onClick={sendNextReportWa} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#25d366,#128c7e)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", cursor: "pointer", boxShadow: "0 4px 15px rgba(37,211,102,0.4)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                {reportWaIndex < reportWaQueue.length - 1 ? `Enviar → ${reportWaQueue[reportWaIndex].name.split(" ")[0]}` : `✓ Concluir`}
               </button>
             </div>
           </div>
