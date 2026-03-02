@@ -522,6 +522,7 @@ export default function App() {
   const [formError, setFormError]       = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [searchCad, setSearchCad]       = useState("");
+  const [searchRegistro, setSearchRegistro] = useState("");
 
   // Escola
   const [showSchoolModal, setShowSchoolModal] = useState(false);
@@ -999,12 +1000,28 @@ export default function App() {
             ) : (
               <div style={{ display: "grid", gap: 14 }}>
 
+                {/* Busca rápida */}
+                <div style={{ position: "relative" }}>
+                  <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 16, pointerEvents: "none" }}>🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Buscar funcionário pelo nome..."
+                    value={searchRegistro}
+                    onChange={e => setSearchRegistro(e.target.value)}
+                    autoComplete="off"
+                    style={{ width: "100%", boxSizing: "border-box", background: "rgba(99,102,241,0.08)", border: searchRegistro ? "1px solid rgba(99,102,241,0.5)" : "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 40px 12px 40px", color: "#f1f5f9", fontSize: 14, fontFamily: "sans-serif", outline: "none", transition: "border 0.2s" }}
+                  />
+                  {searchRegistro && (
+                    <button onClick={() => setSearchRegistro("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 24, height: 24, cursor: "pointer", color: "#94a3b8", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                  )}
+                </div>
+
                 {/* Regulares */}
-                {activeOthers.length > 0 && (
+                {activeOthers.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).length > 0 && (
                   <div>
                     <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Funcionários</div>
                     <div style={{ display: "grid", gap: 8 }}>
-                      {activeOthers.map(emp => {
+                      {activeOthers.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).map(emp => {
                         const status = getStatus(emp.id); const cfg = status ? STATUS_CONFIG[status] : null;
                         return (
                           <div key={emp.id} style={{ background: status ? `${cfg.color}0d` : "rgba(255,255,255,0.04)", border: `1px solid ${status ? cfg.color + "40" : "rgba(255,255,255,0.08)"}`, borderRadius: 14, padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", transition: "all 0.2s" }}>
@@ -1024,14 +1041,14 @@ export default function App() {
                 )}
 
                 {/* Profissionais de Apoio */}
-                {activeApoio.length > 0 && (
+                {activeApoio.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).length > 0 && (
                   <div>
                     <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
                       <span>Profissionais de Apoio</span>
                       <span style={{ background: "rgba(99,102,241,0.2)", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#a5b4fc" }}>Frequência por turno</span>
                     </div>
                     <div style={{ display: "grid", gap: 10 }}>
-                      {activeApoio.map(emp => {
+                      {activeApoio.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).map(emp => {
                         const allFilled = apoioFilled(emp.id);
                         return (
                           <div key={emp.id} style={{ ...card, borderColor: allFilled ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden", transition: "border-color 0.3s" }}>
@@ -1065,6 +1082,15 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* Sem resultados */}
+                {searchRegistro && activeEmployees.filter(e => e.name.toLowerCase().includes(searchRegistro.toLowerCase())).length === 0 && (
+                  <div style={{ textAlign: "center", padding: "40px 20px", color: "#475569", fontFamily: "sans-serif" }}>
+                    <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
+                    <div>Nenhum funcionário encontrado para <strong style={{ color: "#a5b4fc" }}>"{searchRegistro}"</strong></div>
+                  </div>
+                )}
+
               </div>
             )}
 
