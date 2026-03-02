@@ -509,7 +509,7 @@ export default function App() {
   const [currentUser, setCurrentUser]   = useState(null);
   const [systemUsers, setSystemUsers]   = useState([]);
   const [showChangeCreds, setShowChangeCreds] = useState(false);
-  const [userForm, setUserForm]         = useState({ name: "", user: "", pass: "", pass2: "", role: "Coordenador", permissions: { registro: true, relatorio: false, justificativas: false, cadastro: false, escola: false } });
+  const [userForm, setUserForm]         = useState({ name: "", user: "", pass: "", pass2: "", role: "Diretor", permissions: { registro: true, relatorio: false, justificativas: false, cadastro: false, escola: false } });
   const [editingUser, setEditingUser]   = useState(null);
   const [userFormError, setUserFormError] = useState("");
   const [showUserModal, setShowUserModal] = useState(false);
@@ -1724,7 +1724,7 @@ export default function App() {
                 <div style={{ fontSize: 20, fontWeight: "bold", marginBottom: 4 }}>👥 Gerenciar Usuários</div>
                 <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#64748b" }}>Crie usuários e defina o que cada um pode acessar no sistema</div>
               </div>
-              <button onClick={() => { setUserForm({ name: "", user: "", pass: "", pass2: "", role: "Coordenador", permissions: { registro: true, relatorio: false, justificativas: false, cadastro: false, escola: false } }); setEditingUser(null); setUserFormError(""); setShowUserModal(true); }} style={{ padding: "11px 22px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", boxShadow: "0 4px 15px rgba(99,102,241,0.4)", whiteSpace: "nowrap" }}>
+              <button onClick={() => { setUserForm({ name: "", user: "", pass: "", pass2: "", role: "Diretor", permissions: { registro: true, relatorio: false, justificativas: false, cadastro: false, escola: false } }); setEditingUser(null); setUserFormError(""); setShowUserModal(true); }} style={{ padding: "11px 22px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", boxShadow: "0 4px 15px rgba(99,102,241,0.4)", whiteSpace: "nowrap" }}>
                 + Novo Usuário
               </button>
             </div>
@@ -1765,7 +1765,7 @@ export default function App() {
                           <div style={{ fontSize: 14, fontWeight: 700 }}>{u.name || u.user}</div>
                           <div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8" }}>@{u.user} · {u.role}</div>
                         </div>
-                        <span style={{ fontFamily: "sans-serif", fontSize: 11, background: u.role === "Coordenador" ? "rgba(99,102,241,0.2)" : "rgba(20,184,166,0.2)", color: u.role === "Coordenador" ? "#a5b4fc" : "#2dd4bf", borderRadius: 20, padding: "3px 12px", fontWeight: 700, flexShrink: 0 }}>{u.role}</span>
+                        <span style={{ fontFamily: "sans-serif", fontSize: 11, background: u.role === "Diretor" ? "rgba(239,68,68,0.2)" : u.role === "Coordenador" ? "rgba(99,102,241,0.2)" : u.role === "Secretário(a)" ? "rgba(20,184,166,0.2)" : "rgba(245,158,11,0.2)", color: u.role === "Diretor" ? "#f87171" : u.role === "Coordenador" ? "#a5b4fc" : u.role === "Secretário(a)" ? "#2dd4bf" : "#f59e0b", borderRadius: 20, padding: "3px 12px", fontWeight: 700, flexShrink: 0 }}>{u.role}</span>
                       </div>
                       <div style={{ padding: "10px 18px", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                         {activePerms.length === 0
@@ -1811,8 +1811,10 @@ export default function App() {
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Perfil *</label>
                       <select value={userForm.role} onChange={e => setUserForm(f => ({...f, role: e.target.value}))} style={{ width: "100%", background: "#1e293b", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", cursor: "pointer" }}>
+                        <option value="Diretor">Diretor</option>
                         <option value="Coordenador">Coordenador</option>
                         <option value="Secretário(a)">Secretário(a)</option>
+                        <option value="Assistente Administrativo">Assistente Administrativo</option>
                       </select>
                     </div>
 
