@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, orderBy, addDoc } from "firebase/firestore";
 
 /* ─────────────────────────────────────────────
@@ -15,8 +14,7 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID             || "1:438288830739:web:2cd17a173deac64634cae6",
 };
 const firebaseApp = initializeApp(firebaseConfig);
-const db      = getFirestore(firebaseApp);
-const storage = getStorage(firebaseApp);
+const db = getFirestore(firebaseApp);
 
 /* ─────────────────────────────────────────────
    SEGURANÇA — Hash de senha (SHA-256 nativo)
@@ -655,7 +653,6 @@ export default function App() {
   // Escola
   const [showSchoolModal, setShowSchoolModal] = useState(false);
   const [schoolForm, setSchoolForm]           = useState(DEFAULT_SCHOOL);
-  const [logoUploading, setLogoUploading]     = useState(false);
   const logoInputRef                          = useRef();
 
   // WhatsApp modal
@@ -1007,26 +1004,12 @@ export default function App() {
   /* ── Escola ── */
   function openSchoolModal() { setSchoolForm({ ...school }); setShowSchoolModal(true); }
   function handleSchoolSave() { saveSchool(schoolForm); setShowSchoolModal(false); showToast("Dados da escola salvos!"); }
-  async function handleLogoChange(e) {
+  function handleLogoChange(e) {
     const file = e.target.files[0];
     if (!file) return;
-    // Validate size (max 2MB) and type
-    if (file.size > 2 * 1024 * 1024) { showToast("Imagem deve ter no máximo 2MB.", "err"); return; }
-    if (!file.type.startsWith("image/")) { showToast("Selecione um arquivo de imagem.", "err"); return; }
-    setLogoUploading(true);
-    try {
-      const path = `logos/school_logo_${Date.now()}.${file.name.split(".").pop()}`;
-      const fileRef = storageRef(storage, path);
-      await uploadBytes(fileRef, file);
-      const url = await getDownloadURL(fileRef);
-      setSchoolForm(f => ({ ...f, logo: url }));
-      showToast("Logo enviada com sucesso!");
-    } catch(e) {
-      console.error("Erro upload logo:", e);
-      showToast("Erro ao enviar logo. Tente novamente.", "err");
-    } finally {
-      setLogoUploading(false);
-    }
+    const reader = new FileReader();
+    reader.onload = (ev) => setSchoolForm(f => ({ ...f, logo: ev.target.result }));
+    reader.readAsDataURL(file);
   }
 
   /* ── Cadastro ── */
@@ -2232,13 +2215,10 @@ export default function App() {
               }
               <div>
                 <div style={{ fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 6 }}>Logo da Escola</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button onClick={() => !logoUploading && logoInputRef.current.click()} disabled={logoUploading} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: logoUploading ? "not-allowed" : "pointer", background: "rgba(99,102,241,0.2)", color: "#a5b4fc", fontSize: 12, fontFamily: "sans-serif", fontWeight: 600, opacity: logoUploading ? 0.7 : 1 }}>
-                    {logoUploading ? "⏳ Enviando..." : "📁 Escolher"}
-                  </button>
-                  {schoolForm.logo && !logoUploading && <button onClick={() => setSchoolForm(f => ({ ...f, logo: "" }))} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#f87171", fontSize: 12, fontFamily: "sans-serif", fontWeight: 600 }}>✗ Remover</button>}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => logoInputRef.current.click()} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(99,102,241,0.2)", color: "#a5b4fc", fontSize: 12, fontFamily: "sans-serif", fontWeight: 600 }}>📁 Escolher</button>
+                  {schoolForm.logo && <button onClick={() => setSchoolForm(f => ({ ...f, logo: "" }))} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#f87171", fontSize: 12, fontFamily: "sans-serif", fontWeight: 600 }}>✗ Remover</button>}
                 </div>
-                <div style={{ fontSize: 11, color: "#475569", marginTop: 4, fontFamily: "sans-serif" }}>PNG, JPG ou WebP · máx. 2MB · salvo no Firebase Storage</div>
                 <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoChange} style={{ display: "none" }} />
               </div>
             </div>
@@ -2256,7 +2236,7 @@ export default function App() {
               </div>
               <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
                 <button onClick={() => setShowSchoolModal(false)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, fontFamily: "sans-serif", cursor: "pointer" }}>Cancelar</button>
-                <button onClick={handleSchoolSave} disabled={logoUploading} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", cursor: logoUploading ? "not-allowed" : "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)", opacity: logoUploading ? 0.7 : 1 }}>💾 Salvar Dados</button>
+                <button onClick={handleSchoolSave} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", cursor: "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)" }}>💾 Salvar Dados</button>
               </div>
             </div>
           </div>
