@@ -423,14 +423,44 @@ function StatusBtns({ current, onSelect, compact }) {
 /* ─────────────────────────────────────────────
    FORMULÁRIO PÚBLICO DE JUSTIFICATIVA
 ───────────────────────────────────────────── */
+const PUB_MAX_SUBMISSIONS = 3;
+const PUB_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+function getPubSubmissions() {
+  try {
+    const raw = localStorage.getItem("freqschool_pub_submissions");
+    const list = raw ? JSON.parse(raw) : [];
+    // Keep only submissions within the last hour
+    const cutoff = Date.now() - PUB_WINDOW_MS;
+    return list.filter(ts => ts > cutoff);
+  } catch { return []; }
+}
+
+function recordPubSubmission() {
+  try {
+    const list = getPubSubmissions();
+    list.push(Date.now());
+    localStorage.setItem("freqschool_pub_submissions", JSON.stringify(list));
+  } catch {}
+}
+
 function PublicJustForm({ employees, justificativas, saveJustificativas }) {
   const [pubForm, setPubForm] = useState({ empId: "", datas: "", motivo: "", documento: "" });
   const [pubError, setPubError] = useState("");
   const [pubSent, setPubSent] = useState(false);
+  const pubSubmissionsLeft = PUB_MAX_SUBMISSIONS - getPubSubmissions().length;
 
   const activeEmployees = employees.filter(e => e.active !== false);
 
   function handlePublicSubmit() {
+    // Rate limit check
+    const submissions = getPubSubmissions();
+    if (submissions.length >= PUB_MAX_SUBMISSIONS) {
+      const oldestTs = Math.min(...submissions);
+      const minutesLeft = Math.ceil((oldestTs + PUB_WINDOW_MS - Date.now()) / 60000);
+      setPubError(`Limite de ${PUB_MAX_SUBMISSIONS} envios por hora atingido. Tente novamente em ${minutesLeft} minuto(s).`);
+      return;
+    }
     if (!pubForm.empId) { setPubError("Selecione seu nome na lista."); return; }
     if (!pubForm.datas.trim()) { setPubError("Informe a(s) data(s) de ausência."); return; }
     if (!pubForm.motivo.trim()) { setPubError("Informe o motivo."); return; }
@@ -448,6 +478,7 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
       criadoEm: new Date().toISOString(),
     };
     saveJustificativas([...justificativas, nova]);
+    recordPubSubmission();
     setPubSent(true);
     setPubForm({ empId: "", datas: "", motivo: "", documento: "" });
   }
@@ -505,9 +536,16 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
         <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Compartilhe o arquivo no Google Drive e cole o link aqui</div>
       </div>
       {pubError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171" }}>⚠️ {pubError}</div>}
-      <button onClick={handlePublicSubmit} style={{ padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", marginTop: 4 }}>
-        📤 Enviar Justificativa
-      </button>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4, gap: 12, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: "sans-serif", fontSize: 11, color: pubSubmissionsLeft <= 1 ? "#f59e0b" : "#475569" }}>
+          {pubSubmissionsLeft > 0
+            ? `${pubSubmissionsLeft} envio(s) restante(s) nesta hora`
+            : "⚠️ Limite de envios atingido"}
+        </span>
+        <button onClick={handlePublicSubmit} disabled={pubSubmissionsLeft <= 0} style={{ flex: 1, minWidth: 180, padding: "14px", borderRadius: 12, border: "none", cursor: pubSubmissionsLeft <= 0 ? "not-allowed" : "pointer", background: pubSubmissionsLeft <= 0 ? "rgba(100,116,139,0.3)" : "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: pubSubmissionsLeft > 0 ? "0 4px 18px rgba(99,102,241,0.4)" : "none", opacity: pubSubmissionsLeft <= 0 ? 0.6 : 1 }}>
+          📤 Enviar Justificativa
+        </button>
+      </div>
     </div>
   );
 }
@@ -561,6 +599,8 @@ export default function App() {
   const [loginPass, setLoginPass]       = useState("");
   const [loginError, setLoginError]     = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
+  const [loginAttempts, setLoginAttempts]       = useState(0);
+  const [loginBlockedUntil, setLoginBlockedUntil] = useState(null); // Date object
   const [credentials, setCredentials]   = useState({ user: "admin", pass: "escola123" });
   const [systemUsers, setSystemUsers]   = useState([]);
   const [showChangeCreds, setShowChangeCreds] = useState(false);
@@ -790,7 +830,19 @@ export default function App() {
   }
 
   /* ── Login ── */
+  const MAX_LOGIN_ATTEMPTS = 5;
+  const BLOCK_DURATION_MS  = 5 * 60 * 1000; // 5 minutes
+
   async function handleLogin() {
+    // Check if currently blocked
+    if (loginBlockedUntil && new Date() < loginBlockedUntil) {
+      const secsLeft = Math.ceil((loginBlockedUntil - new Date()) / 1000);
+      const mins = Math.floor(secsLeft / 60);
+      const secs = secsLeft % 60;
+      setLoginError(`Muitas tentativas. Aguarde ${mins}:${String(secs).padStart(2,"0")} para tentar novamente.`);
+      return;
+    }
+
     setLoginLoading(true);
     setLoginError("");
     const inputHash = await hashPassword(loginPass);
@@ -808,6 +860,8 @@ export default function App() {
       const gestorToken = await generateSessionToken();
       setSessionToken(gestorToken);
       try { await setDoc(doc(db, "sessions", gestorToken), { role: "Gestor", user: credentials.user, createdAt: new Date().toISOString() }); } catch {}
+      setLoginAttempts(0);
+      setLoginBlockedUntil(null);
       setCurrentUser({ user: credentials.user, role: "Gestor", name: "Gestor", permissions: { registro: true, relatorio: true, justificativas: true, cadastro: true, escola: true } });
       setAuthedPersisted(true);
       setShowLoginForm(false);
@@ -831,12 +885,22 @@ export default function App() {
       const userToken = await generateSessionToken();
       setSessionToken(userToken);
       try { await setDoc(doc(db, "sessions", userToken), { role: found.role, user: found.user, createdAt: new Date().toISOString() }); } catch {}
+      setLoginAttempts(0);
+      setLoginBlockedUntil(null);
       setCurrentUser(found);
       setAuthedPersisted(true);
       setShowLoginForm(false);
       setLoginError("");
     } else {
-      setLoginError("Usuário ou senha incorretos.");
+      const newAttempts = loginAttempts + 1;
+      setLoginAttempts(newAttempts);
+      if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+        const blockedUntil = new Date(Date.now() + BLOCK_DURATION_MS);
+        setLoginBlockedUntil(blockedUntil);
+        setLoginError(`Conta bloqueada por 5 minutos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`);
+      } else {
+        setLoginError(`Usuário ou senha incorretos. ${MAX_LOGIN_ATTEMPTS - newAttempts} tentativa(s) restante(s).`);
+      }
     }
     setLoginLoading(false);
   }
@@ -1031,8 +1095,13 @@ export default function App() {
                   <input type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="Digite a senha" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
                 </div>
                 {loginError && <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#f87171", textAlign: "center" }}>⚠️ {loginError}</div>}
-                <button onClick={handleLogin} disabled={loginLoading} style={{ padding: "13px", borderRadius: 12, border: "none", cursor: loginLoading ? "not-allowed" : "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", opacity: loginLoading ? 0.7 : 1 }}>
-                  {loginLoading ? "⏳ Verificando..." : "🔐 Entrar"}
+                {loginBlockedUntil && new Date() < loginBlockedUntil && (
+                  <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#f87171", textAlign: "center", fontFamily: "sans-serif" }}>
+                    🔒 Acesso temporariamente bloqueado. Tente novamente em alguns minutos.
+                  </div>
+                )}
+                <button onClick={handleLogin} disabled={loginLoading || (loginBlockedUntil && new Date() < loginBlockedUntil)} style={{ padding: "13px", borderRadius: 12, border: "none", cursor: (loginLoading || (loginBlockedUntil && new Date() < loginBlockedUntil)) ? "not-allowed" : "pointer", background: (loginBlockedUntil && new Date() < loginBlockedUntil) ? "rgba(100,116,139,0.3)" : "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 15, fontWeight: 700, boxShadow: "0 4px 18px rgba(99,102,241,0.4)", opacity: (loginLoading || (loginBlockedUntil && new Date() < loginBlockedUntil)) ? 0.6 : 1 }}>
+                  {loginLoading ? "⏳ Verificando..." : (loginBlockedUntil && new Date() < loginBlockedUntil) ? "🔒 Bloqueado" : "🔐 Entrar"}
                 </button>
               </div>
             </div>
