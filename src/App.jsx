@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, onSnapshot, collection } from "firebase/firestore";
+import { getFirestore, doc, setDoc, updateDoc, onSnapshot, collection } from "firebase/firestore";
 
 /* ─────────────────────────────────────────────
    FIREBASE CONFIG
 ───────────────────────────────────────────── */
 const firebaseConfig = {
-  apiKey: "AIzaSyAQYtoQBZ4_dYI98UQoFgf4M1wis9laSMA",
-  authDomain: "freqschool.firebaseapp.com",
-  projectId: "freqschool",
-  storageBucket: "freqschool.firebasestorage.app",
-  messagingSenderId: "438288830739",
-  appId: "1:438288830739:web:2cd17a173deac64634cae6"
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY            || "AIzaSyAQYtoQBZ4_dYI98UQoFgf4M1wis9laSMA",
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN        || "freqschool.firebaseapp.com",
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID         || "freqschool",
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET     || "freqschool.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID|| "438288830739",
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID             || "1:438288830739:web:2cd17a173deac64634cae6",
 };
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
@@ -491,7 +491,30 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
 }
 
 export default function App() {
-  const [authed, setAuthed]             = useState(false);
+  const [authed, setAuthed] = useState(() => {
+    try { return sessionStorage.getItem("freqschool_authed") === "1"; } catch { return false; }
+  });
+  const [currentUser, setCurrentUserState] = useState(() => {
+    try { const s = sessionStorage.getItem("freqschool_user"); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+
+  // Wrap setCurrentUser to also persist to sessionStorage
+  const setCurrentUser = (user) => {
+    setCurrentUserState(user);
+    try {
+      if (user) sessionStorage.setItem("freqschool_user", JSON.stringify(user));
+      else sessionStorage.removeItem("freqschool_user");
+    } catch {}
+  };
+
+  // Wrap setAuthed to also persist
+  const setAuthedPersisted = (val) => {
+    setAuthed(val);
+    try {
+      if (val) sessionStorage.setItem("freqschool_authed", "1");
+      else sessionStorage.removeItem("freqschool_authed");
+    } catch {}
+  };
 
   // Fix tela cheia no computador
   useEffect(() => {
@@ -506,7 +529,6 @@ export default function App() {
   const [loginError, setLoginError]     = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [credentials, setCredentials]   = useState({ user: "admin", pass: "escola123" });
-  const [currentUser, setCurrentUser]   = useState(null);
   const [systemUsers, setSystemUsers]   = useState([]);
   const [showChangeCreds, setShowChangeCreds] = useState(false);
   const [userForm, setUserForm]         = useState({ name: "", user: "", pass: "", pass2: "", role: "Diretor", permissions: { registro: true, relatorio: false, justificativas: false, cadastro: false, escola: false } });
@@ -593,6 +615,30 @@ export default function App() {
   const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          } catch(e) { console.error("erro escola:", e); } };
   const saveEmployees = async (l) => { setEmployees(l); try { await setDoc(doc(db, "config", "employees"), { list: l }); } catch(e) { console.error("erro employees:", e); } };
   const saveRecords   = async (r) => { setRecords(r);   try { await setDoc(doc(db, "config", "records"),   { data: r }); } catch(e) { console.error("erro records:", e); } };
+
+  // Atomic single-key write — prevents race conditions when two users mark attendance simultaneously
+  const setRecordAtomic = async (key, value) => {
+    setRecords(prev => ({ ...prev, [key]: value }));
+    try {
+      await updateDoc(doc(db, "config", "records"), { [`data.${key}`]: value });
+    } catch(e) {
+      // Document may not exist yet — fall back to setDoc
+      try { await setDoc(doc(db, "config", "records"), { data: { ...records, [key]: value } }); }
+      catch(e2) { console.error("erro setRecordAtomic:", e2); }
+    }
+  };
+
+  // Atomic multi-key write (for approve justificativa which changes several keys at once)
+  const setRecordsAtomic = async (keysObj) => {
+    setRecords(prev => ({ ...prev, ...keysObj }));
+    const patch = Object.fromEntries(Object.entries(keysObj).map(([k, v]) => [`data.${k}`, v]));
+    try {
+      await updateDoc(doc(db, "config", "records"), patch);
+    } catch(e) {
+      try { await setDoc(doc(db, "config", "records"), { data: { ...records, ...keysObj } }); }
+      catch(e2) { console.error("erro setRecordsAtomic:", e2); }
+    }
+  };
   const saveCreds     = async (c) => { setCredentials(c); try { await setDoc(doc(db, "config", "credentials"), c); } catch(e) { console.error("erro creds:", e); } };
 
   const saveJustificativas = async (list) => {
@@ -635,7 +681,7 @@ export default function App() {
     saveJustificativas(updated);
     const datas = just.datas.replace(/\n/g, ",").split(",").map(d => d.trim()).filter(Boolean);
     const emp = employees.find(e => e.id === just.empId);
-    let newRecords = { ...records };
+    const keysToUpdate = {};
     datas.forEach(dataStr => {
       let dateKey = "";
       if (dataStr.includes("/")) {
@@ -644,12 +690,12 @@ export default function App() {
       } else { dateKey = dataStr; }
       if (!dateKey) return;
       if (emp && IS_APOIO(emp.role)) {
-        TURNOS.forEach(t => { const k = recordKey(dateKey, just.empId, t); newRecords[k] = "justificado"; });
+        TURNOS.forEach(t => { keysToUpdate[recordKey(dateKey, just.empId, t)] = "justificado"; });
       } else {
-        const k = recordKey(dateKey, just.empId); newRecords[k] = "justificado";
+        keysToUpdate[recordKey(dateKey, just.empId)] = "justificado";
       }
     });
-    saveRecords(newRecords);
+    setRecordsAtomic(keysToUpdate);
     showToast("Justificativa aprovada!");
     // Notificar via WhatsApp se tiver telefone
     if (emp && emp.phone) {
@@ -718,7 +764,7 @@ export default function App() {
       // Check gestor (master)
       if (loginUser.trim() === credentials.user && loginPass === credentials.pass) {
         setCurrentUser({ user: credentials.user, role: "Gestor", name: "Gestor", permissions: { registro: true, relatorio: true, justificativas: true, cadastro: true, escola: true } });
-        setAuthed(true);
+        setAuthedPersisted(true);
         setShowLoginForm(false);
         setLoginError("");
         setLoginLoading(false);
@@ -728,7 +774,7 @@ export default function App() {
       const found = systemUsers.find(u => u.user.toLowerCase() === loginUser.trim().toLowerCase() && u.pass === loginPass);
       if (found) {
         setCurrentUser(found);
-        setAuthed(true);
+        setAuthedPersisted(true);
         setShowLoginForm(false);
         setLoginError("");
       } else {
@@ -787,7 +833,7 @@ export default function App() {
   const toggleActive = (id) => saveEmployees(employees.map(e => e.id === id ? { ...e, active: !e.active } : e));
 
   /* ── Registro ── */
-  const setStatus   = (empId, status, turno = null) => saveRecords({ ...records, [recordKey(selectedDate, empId, turno)]: status });
+  const setStatus   = (empId, status, turno = null) => setRecordAtomic(recordKey(selectedDate, empId, turno), status);
   const getStatus   = (empId, date = selectedDate, turno = null) => records[recordKey(date, empId, turno)] || null;
   const apoioFilled = (empId, date = selectedDate) => TURNOS.every(t => !!getStatus(empId, date, t));
 
@@ -992,7 +1038,7 @@ export default function App() {
               🔑 Alterar Senha
             </button>
           )}
-          <button onClick={() => { setAuthed(false); setCurrentUser(null); setShowLoginForm(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={() => { setAuthedPersisted(false); setCurrentUser(null); setShowLoginForm(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             🚪 Sair
           </button>
         </div>
