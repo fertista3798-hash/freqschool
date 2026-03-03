@@ -626,7 +626,10 @@ export default function App() {
   const [records, setRecords]       = useState({}); // { "YYYY-MM": { key: status, ... } }
   const [loadedMonths, setLoadedMonths] = useState(new Set()); // which months have Firebase listeners
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
-  const [reportType, setReportType] = useState("semanal");
+  const [reportType, setReportType]     = useState("semanal");
+  const [reportView, setReportView]       = useState("cards");   // "cards" | "tabela"
+  const [reportSearch, setReportSearch]   = useState("");
+  const [reportFilter, setReportFilter]   = useState("todos");   // "todos"|"ausentes"|"abaixo75"|"semregistro"
   const [saved, setSaved]           = useState(false);
   const [pdfLoading, setPdfLoading]   = useState(false);
 
@@ -1090,7 +1093,7 @@ export default function App() {
     const compute = (keys) => {
       let p = 0, a = 0, j = 0, f = 0;
       keys.forEach(k => {
-        const s = records[k];
+        const s = getRecordValue(k);
         if (s === "presente") p++; else if (s === "ausente") a++; else if (s === "justificado") j++; else if (s === "folga") f++;
       });
       const total = p + a + j + f;
@@ -1451,134 +1454,263 @@ export default function App() {
         )}
 
         {/* ══════════ RELATÓRIO ══════════ */}
-        {tab === "relatorio" && (
-          <div>
-            <div style={{ display: "flex", gap: 10, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 4 }}>
-                {["semanal", "mensal"].map(r => (
-                  <button key={r} onClick={() => setReportType(r)} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, transition: "all 0.2s", background: reportType === r ? "#6366f1" : "transparent", color: reportType === r ? "#fff" : "#94a3b8" }}>{r === "semanal" ? "📅 Semanal" : "🗓️ Mensal"}</button>
-                ))}
-              </div>
-              <span style={{ fontFamily: "sans-serif", fontSize: 13, color: "#94a3b8" }}>{reportType === "semanal" ? "Semana atual" : monthName}</span>
-              <button
-                onClick={async () => {
-                  setPdfLoading(true);
-                  try {
-                    await exportRelatorioPDF({ school, activeEmployees, activeOthers, activeApoio, reportDates, reportType, records, monthName, getEmpSummary });
-                    showToast("PDF exportado com sucesso!");
-                  } catch(e) {
-                    showToast("Erro ao gerar PDF.", "err");
-                  } finally {
-                    setPdfLoading(false);
-                  }
-                }}
-                disabled={pdfLoading}
-                style={{ marginLeft:"auto", padding:"9px 20px", borderRadius:10, border:"none", cursor:pdfLoading?"not-allowed":"pointer", background:pdfLoading?"rgba(239,68,68,0.3)":"linear-gradient(135deg,#ef4444,#dc2626)", color:"#fff", fontSize:13, fontWeight:700, fontFamily:"sans-serif", boxShadow:pdfLoading?"none":"0 4px 15px rgba(239,68,68,0.35)", display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}
-              >
-                {pdfLoading ? "⏳ Gerando..." : "📄 Exportar PDF"}
-              </button>
-            </div>
+        {tab === "relatorio" && (() => {
+          /* ─── computed ─── */
+          const empsSm = activeEmployees.map(emp => ({ emp, sm: getEmpSummary(emp) }));
+          const getAvgPct = (emp, sm) => IS_APOIO(emp.role)
+            ? (sm.manha?.pct != null && sm.tarde?.pct != null ? Math.round((sm.manha.pct + sm.tarde.pct) / 2) : sm.manha?.pct ?? sm.tarde?.pct)
+            : sm.geral?.pct;
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 22 }}>
-              {Object.entries(STATUS_CONFIG).map(([k, v]) => {
-                const total = reportDates.reduce((acc, d) => {
-                  const o = activeOthers.filter(e => records[recordKey(d, e.id)] === k).length;
-                  const a = activeApoio.reduce((s, e) => s + TURNOS.filter(t => records[recordKey(d, e.id, t)] === k).length, 0);
-                  return acc + o + a;
-                }, 0);
-                return <div key={k} style={{ background: `${v.color}15`, border: `1px solid ${v.color}40`, borderRadius: 14, padding: "14px 18px", textAlign: "center" }}><div style={{ fontSize: 26, fontWeight: 900, color: v.color }}>{total}</div><div style={{ fontFamily: "sans-serif", fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{v.label}</div></div>;
-              })}
-            </div>
+          const totals = {};
+          Object.keys(STATUS_CONFIG).forEach(k => {
+            totals[k] = reportDates.reduce((acc, d) => {
+              const o = activeOthers.filter(e => getRecordValue(recordKey(d, e.id)) === k).length;
+              const a = activeApoio.reduce((s, e) => s + TURNOS.filter(t => getRecordValue(recordKey(d, e.id, t)) === k).length, 0);
+              return acc + o + a;
+            }, 0);
+          });
+          const totalSlots = reportDates.length * (activeOthers.length + activeApoio.length * 2);
+          const taxaGeral  = totalSlots > 0 ? Math.round(((totals.presente || 0) / totalSlots) * 100) : null;
+          const alertCount = empsSm.filter(({ emp, sm }) => { const p = getAvgPct(emp, sm); return p !== null && p < 75; }).length;
 
-            <div style={{ ...card, overflow: "hidden", marginBottom: 22 }}>
-              <div style={{ padding: "12px 18px", background: "rgba(99,102,241,0.1)", borderBottom: "1px solid rgba(255,255,255,0.07)", fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: "#a5b4fc", letterSpacing: 1, textTransform: "uppercase" }}>
-                Resumo por Funcionário — {reportType === "semanal" ? "Esta Semana" : monthName}
+          /* ─── filter + search ─── */
+          const filtered = empsSm.filter(({ emp, sm }) => {
+            const pct = getAvgPct(emp, sm);
+            const q   = reportSearch.toLowerCase();
+            const matchSearch = !q || emp.name.toLowerCase().includes(q) || emp.role.toLowerCase().includes(q);
+            const matchFilter =
+              reportFilter === "ausentes"    ? (IS_APOIO(emp.role) ? (sm.manha?.ausente > 0 || sm.tarde?.ausente > 0) : sm.geral?.ausente > 0) :
+              reportFilter === "abaixo75"    ? (pct !== null && pct < 75) :
+              reportFilter === "semregistro" ? (pct === null) : true;
+            return matchSearch && matchFilter;
+          });
+
+          const pctBar = (pct) => {
+            if (pct === null) return null;
+            const col = pct >= 75 ? "#22c55e" : pct >= 50 ? "#f59e0b" : "#ef4444";
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: col, borderRadius: 2 }} />
+                </div>
+                <span style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 800, color: col, minWidth: 34, textAlign: "right" }}>{pct}%</span>
               </div>
-              {activeEmployees.length === 0 ? (
-                <div style={{ padding: "30px", textAlign: "center", color: "#475569", fontFamily: "sans-serif", fontSize: 13 }}>Nenhum funcionário ativo.</div>
-              ) : activeEmployees.map((emp, i) => {
-                const sm = getEmpSummary(emp), apoio = IS_APOIO(emp.role);
-                return (
-                  <div key={emp.id} style={{ padding: "13px 18px", borderBottom: i < activeEmployees.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                      <div style={{ width: 34, height: 34, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
-                      <div style={{ flex: 1, minWidth: 120 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                          {emp.name}
-                          {apoio && <span style={{ fontFamily: "sans-serif", fontSize: 10, background: "rgba(99,102,241,0.2)", color: "#a5b4fc", borderRadius: 5, padding: "1px 6px" }}>Apoio</span>}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "sans-serif" }}>{emp.role}</div>
-                      </div>
-                      {!apoio && (<>
-                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                          {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                            <div key={k} style={{ background: `${v.color}20`, borderRadius: 6, padding: "3px 9px", fontFamily: "sans-serif", fontSize: 11, color: v.color, fontWeight: 700 }}>{STATUS_ICON_DISPLAY[k]} {sm.geral[k]}</div>
-                          ))}
-                        </div>
-                        <div style={{ minWidth: 70, textAlign: "right" }}>
-                          {sm.geral.pct !== null
-                            ? <div><div style={{ fontFamily: "sans-serif", fontSize: 17, fontWeight: 900, color: sm.geral.pct >= 75 ? "#22c55e" : sm.geral.pct >= 50 ? "#f59e0b" : "#ef4444" }}>{sm.geral.pct}%</div><div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b" }}>presença</div></div>
-                            : <span style={{ fontFamily: "sans-serif", fontSize: 12, color: "#475569" }}>—</span>}
-                        </div>
-                      </>)}
-                    </div>
-                    {apoio && (
-                      <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                        {TURNOS.map(turno => {
-                          const td = sm[turno];
-                          return (
-                            <div key={turno} style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${TURNO_COLOR[turno]}30`, borderRadius: 10, padding: "9px 12px" }}>
-                              <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 700, color: TURNO_COLOR[turno], marginBottom: 5 }}>{TURNO_LABEL[turno]}</div>
-                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 5 }}>
-                                {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                                  <div key={k} style={{ background: `${v.color}20`, borderRadius: 5, padding: "2px 7px", fontFamily: "sans-serif", fontSize: 11, color: v.color, fontWeight: 700 }}>{STATUS_ICON_DISPLAY[k]} {td[k]}</div>
-                                ))}
-                              </div>
-                              {td.pct !== null
-                                ? <div style={{ fontFamily: "sans-serif", fontSize: 13, fontWeight: 900, color: td.pct >= 75 ? "#22c55e" : td.pct >= 50 ? "#f59e0b" : "#ef4444" }}>{td.pct}% presença</div>
-                                : <div style={{ fontFamily: "sans-serif", fontSize: 12, color: "#475569" }}>Sem registros</div>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+            );
+          };
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+              {/* ══ Toolbar ══ */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {/* período */}
+                <div style={{ display: "flex", gap: 3, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 3 }}>
+                  {[["semanal","📅 Semanal"],["mensal","🗓️ Mensal"]].map(([r, lb]) => (
+                    <button key={r} onClick={() => setReportType(r)} style={{ padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 13, fontWeight: 600, background: reportType === r ? "#6366f1" : "transparent", color: reportType === r ? "#fff" : "#94a3b8" }}>{lb}</button>
+                  ))}
+                </div>
+                <span style={{ fontFamily: "sans-serif", fontSize: 12, color: "#475569", background: "rgba(255,255,255,0.04)", padding: "6px 11px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.07)", whiteSpace: "nowrap" }}>
+                  {reportType === "semanal" ? `${formatDate(reportDates[0])} – ${formatDate(reportDates[reportDates.length-1])}` : monthName}
+                </span>
+                {/* view toggle */}
+                <div style={{ display: "flex", gap: 3, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 3, marginLeft: "auto" }}>
+                  {[["cards","▦"],["tabela","⊞"]].map(([v, ic]) => (
+                    <button key={v} title={v === "cards" ? "Cards" : "Tabela"} onClick={() => setReportView(v)} style={{ padding: "7px 13px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 15, background: reportView === v ? "rgba(99,102,241,0.35)" : "transparent", color: reportView === v ? "#e0e7ff" : "#64748b" }}>{ic}</button>
+                  ))}
+                </div>
+                {/* PDF */}
+                <button onClick={async () => { setPdfLoading(true); try { await exportRelatorioPDF({ school, activeEmployees, activeOthers, activeApoio, reportDates, reportType, records, monthName, getEmpSummary }); showToast("PDF exportado!"); } catch { showToast("Erro ao gerar PDF.", "err"); } finally { setPdfLoading(false); } }} disabled={pdfLoading} style={{ padding: "8px 18px", borderRadius: 10, border: "none", cursor: pdfLoading ? "not-allowed" : "pointer", background: pdfLoading ? "rgba(239,68,68,0.3)" : "linear-gradient(135deg,#ef4444,#dc2626)", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "sans-serif", boxShadow: pdfLoading ? "none" : "0 4px 12px rgba(239,68,68,0.3)", whiteSpace: "nowrap" }}>
+                  {pdfLoading ? "⏳ Gerando..." : "📄 PDF"}
+                </button>
+              </div>
+
+              {/* ══ KPIs ══ */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(100px,1fr))", gap: 8 }}>
+                <div style={{ background: "linear-gradient(135deg,rgba(99,102,241,0.18),rgba(139,92,246,0.12))", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 14, padding: "14px 12px", textAlign: "center" }}>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: taxaGeral === null ? "#334155" : taxaGeral >= 75 ? "#22c55e" : taxaGeral >= 50 ? "#f59e0b" : "#ef4444" }}>{taxaGeral !== null ? `${taxaGeral}%` : "—"}</div>
+                  <div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 }}>Taxa Geral</div>
+                </div>
+                {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                  <div key={k} style={{ background: `${v.color}10`, border: `1px solid ${v.color}30`, borderRadius: 14, padding: "14px 12px", textAlign: "center" }}>
+                    <div style={{ fontSize: 26, fontWeight: 900, color: v.color }}>{totals[k] || 0}</div>
+                    <div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 }}>{v.label}</div>
                   </div>
-                );
-              })}
-            </div>
-
-            {reportType === "semanal" && activeEmployees.length > 0 && (
-              <div>
-                <div style={{ fontFamily: "sans-serif", fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Visão Diária da Semana</div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: "sans-serif", fontSize: 12 }}>
-                    <thead><tr>
-                      <th style={{ padding: "7px 12px", textAlign: "left", color: "#64748b", fontWeight: 600, whiteSpace: "nowrap" }}>Funcionário</th>
-                      {reportDates.map(d => { const dow = new Date(d + "T12:00:00").getDay(); return <th key={d} style={{ padding: "7px 8px", textAlign: "center", color: d === getTodayStr() ? "#a5b4fc" : "#64748b", fontWeight: 600, whiteSpace: "nowrap" }}>{DAYS_PT[dow]}<br />{formatDateShort(d)}</th>; })}
-                    </tr></thead>
-                    <tbody>
-                      {activeOthers.map(emp => (
-                        <tr key={emp.id}>
-                          <td style={{ padding: "5px 12px", color: "#cbd5e1", whiteSpace: "nowrap" }}>{emp.name.split(" ")[0]}</td>
-                          {reportDates.map(d => { const st = records[recordKey(d, emp.id)]; const cfg = st ? STATUS_CONFIG[st] : null; return <td key={d} style={{ padding: "5px 8px", textAlign: "center" }}>{cfg ? <span title={cfg.label} style={{ display: "inline-block", width: 24, height: 24, lineHeight: "24px", borderRadius: 6, background: cfg.color + "30", color: cfg.color, fontWeight: 700, fontSize: 12, border: `1px solid ${cfg.color}40` }}>{STATUS_ICON_DISPLAY[st]}</span> : <span style={{ display: "inline-block", width: 24, height: 24, borderRadius: 6, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }} />}</td>; })}
-                        </tr>
-                      ))}
-                      {activeApoio.map(emp => TURNOS.map((turno, ti) => (
-                        <tr key={`${emp.id}_${turno}`} style={{ background: ti === 0 ? "rgba(255,255,255,0.015)" : "transparent" }}>
-                          <td style={{ padding: "4px 12px", color: ti === 0 ? "#cbd5e1" : "#94a3b8", whiteSpace: "nowrap", fontSize: 11 }}>
-                            {ti === 0 ? emp.name.split(" ")[0] : ""}
-                            <span style={{ marginLeft: 4, color: TURNO_COLOR[turno], fontSize: 10 }}>{turno === "manha" ? "☀️M" : "🌙T"}</span>
-                          </td>
-                          {reportDates.map(d => { const st = records[recordKey(d, emp.id, turno)]; const cfg = st ? STATUS_CONFIG[st] : null; return <td key={d} style={{ padding: "4px 8px", textAlign: "center" }}>{cfg ? <span title={cfg.label} style={{ display: "inline-block", width: 22, height: 22, lineHeight: "22px", borderRadius: 5, background: cfg.color + "30", color: cfg.color, fontWeight: 700, fontSize: 11, border: `1px solid ${cfg.color}40` }}>{STATUS_ICON_DISPLAY[st]}</span> : <span style={{ display: "inline-block", width: 22, height: 22, borderRadius: 5, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }} />}</td>; })}
-                        </tr>
-                      )))}
-                    </tbody>
-                  </table>
+                ))}
+                <div style={{ background: "rgba(239,68,68,0.08)", border: `1px solid rgba(239,68,68,${alertCount > 0 ? "0.4" : "0.15"})`, borderRadius: 14, padding: "14px 12px", textAlign: "center" }}>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: alertCount > 0 ? "#ef4444" : "#334155" }}>{alertCount}</div>
+                  <div style={{ fontFamily: "sans-serif", fontSize: 10, color: "#64748b", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.5 }}>Abaixo 75%</div>
                 </div>
               </div>
-            )}
-          </div>
-        )}
+
+              {/* ══ Busca + Filtros ══ */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <input type="text" placeholder="🔍 Buscar funcionário ou cargo..." value={reportSearch} onChange={e => setReportSearch(e.target.value)} style={{ flex: 1, minWidth: 180, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 9, padding: "8px 13px", color: "#f1f5f9", fontSize: 13, outline: "none", fontFamily: "sans-serif" }} />
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {[["todos","Todos"],["ausentes","Com Falta"],["abaixo75","< 75%"],["semregistro","Sem Registro"]].map(([f, lb]) => (
+                    <button key={f} onClick={() => setReportFilter(f)} style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "sans-serif", fontSize: 12, fontWeight: 600, background: reportFilter === f ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.05)", color: reportFilter === f ? "#c7d2fe" : "#64748b" }}>{lb}{reportFilter === f && f !== "todos" ? ` (${filtered.length})` : ""}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ══ Conteúdo ══ */}
+              {filtered.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "48px 20px", color: "#334155", fontFamily: "sans-serif", fontSize: 14 }}>
+                  {activeEmployees.length === 0 ? "Nenhum funcionário ativo." : "Nenhum resultado com esses filtros."}
+                </div>
+
+              ) : reportView === "cards" ? (
+                /* ── Cards ── */
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {filtered.map(({ emp, sm }) => {
+                    const apoio = IS_APOIO(emp.role);
+                    const pct   = getAvgPct(emp, sm);
+                    const pctColor = pct === null ? "#334155" : pct >= 75 ? "#22c55e" : pct >= 50 ? "#f59e0b" : "#ef4444";
+                    return (
+                      <div key={emp.id} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden", transition: "border-color 0.15s" }}>
+                        {/* cabeçalho do card */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
+                          <div style={{ width: 38, height: 38, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#f1f5f9", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              {emp.name}
+                              {apoio && <span style={{ fontSize: 10, background: "rgba(99,102,241,0.2)", color: "#a5b4fc", borderRadius: 5, padding: "2px 7px", fontFamily: "sans-serif" }}>Apoio</span>}
+                              {pct !== null && pct < 75 && <span style={{ fontSize: 10, background: "rgba(239,68,68,0.15)", color: "#f87171", borderRadius: 5, padding: "2px 7px", fontFamily: "sans-serif" }}>⚠ Abaixo 75%</span>}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#64748b", fontFamily: "sans-serif", marginTop: 2 }}>{emp.role}</div>
+                          </div>
+                          <div style={{ textAlign: "right", minWidth: 56 }}>
+                            <div style={{ fontSize: 22, fontWeight: 900, color: pctColor, lineHeight: 1 }}>{pct !== null ? `${pct}%` : "—"}</div>
+                            <div style={{ fontSize: 10, color: "#475569", fontFamily: "sans-serif", marginTop: 1 }}>presença</div>
+                          </div>
+                        </div>
+                        {/* barra geral */}
+                        {pct !== null && (
+                          <div style={{ height: 3, background: "rgba(255,255,255,0.06)", margin: "0 0 0 0" }}>
+                            <div style={{ height: "100%", width: `${pct}%`, background: pctColor }} />
+                          </div>
+                        )}
+                        {/* chips status — funcionário normal */}
+                        {!apoio && (
+                          <div style={{ display: "flex", gap: 5, padding: "10px 16px", flexWrap: "wrap" }}>
+                            {Object.entries(STATUS_CONFIG).map(([k, v]) => sm.geral[k] > 0 && (
+                              <span key={k} style={{ background: `${v.color}15`, border: `1px solid ${v.color}30`, borderRadius: 20, padding: "3px 10px", fontFamily: "sans-serif", fontSize: 11, color: v.color, fontWeight: 700 }}>{v.icon} {sm.geral[k]}× {v.label}</span>
+                            ))}
+                            {sm.geral.total === 0 && <span style={{ fontFamily: "sans-serif", fontSize: 11, color: "#334155" }}>Sem registros no período</span>}
+                          </div>
+                        )}
+                        {/* turnos — apoio */}
+                        {apoio && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "10px 16px" }}>
+                            {TURNOS.map(turno => {
+                              const td = sm[turno];
+                              return (
+                                <div key={turno} style={{ background: `${TURNO_COLOR[turno]}08`, border: `1px solid ${TURNO_COLOR[turno]}25`, borderRadius: 10, padding: "9px 12px" }}>
+                                  <div style={{ fontFamily: "sans-serif", fontSize: 11, fontWeight: 700, color: TURNO_COLOR[turno], marginBottom: 6 }}>{TURNO_LABEL[turno]}</div>
+                                  <div style={{ display: "flex", gap: 3, flexWrap: "wrap", marginBottom: 6 }}>
+                                    {Object.entries(STATUS_CONFIG).map(([k, v]) => td[k] > 0 && (
+                                      <span key={k} style={{ background: `${v.color}18`, borderRadius: 5, padding: "2px 7px", fontFamily: "sans-serif", fontSize: 10, color: v.color, fontWeight: 700 }}>{v.icon} {td[k]}</span>
+                                    ))}
+                                  </div>
+                                  {pctBar(td.pct)}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+              ) : (
+                /* ── Tabela ── */
+                <div style={{ ...card, overflow: "hidden" }}>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: "sans-serif", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: "rgba(99,102,241,0.08)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                          <th style={{ padding: "10px 14px", textAlign: "left", color: "#94a3b8", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>Funcionário</th>
+                          {reportDates.map(d => {
+                            const dow = new Date(d + "T12:00:00").getDay();
+                            const isHoje = d === getTodayStr();
+                            const isWknd = dow === 0 || dow === 6;
+                            return (
+                              <th key={d} style={{ padding: "10px 5px", textAlign: "center", color: isHoje ? "#a5b4fc" : isWknd ? "#2d3748" : "#64748b", fontWeight: 600, fontSize: 11, background: isHoje ? "rgba(99,102,241,0.12)" : "transparent", minWidth: 30, whiteSpace: "nowrap" }}>
+                                <div>{DAYS_PT[dow]}</div>
+                                <div style={{ fontSize: 9, opacity: 0.6, marginTop: 1 }}>{formatDateShort(d)}</div>
+                              </th>
+                            );
+                          })}
+                          <th style={{ padding: "10px 14px", textAlign: "center", color: "#94a3b8", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map(({ emp, sm }, ri) => {
+                          const apoio = IS_APOIO(emp.role);
+                          const rowBg = ri % 2 === 0 ? "transparent" : "rgba(255,255,255,0.012)";
+                          const avatar = (
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ width: 26, height: 26, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: "bold", flexShrink: 0 }}>{getInitials(emp.name)}</div>
+                              <div>
+                                <div style={{ color: "#e2e8f0", fontWeight: 600 }}>{emp.name}</div>
+                                <div style={{ color: "#475569", fontSize: 10 }}>{emp.role}</div>
+                              </div>
+                            </div>
+                          );
+                          const cell = (st, isHoje) => {
+                            const cfg = st ? STATUS_CONFIG[st] : null;
+                            return (
+                              <td style={{ padding: "5px", textAlign: "center", background: isHoje ? "rgba(99,102,241,0.06)" : "transparent" }}>
+                                {cfg
+                                  ? <span title={cfg.label} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: 6, background: cfg.color + "22", color: cfg.color, fontWeight: 800, fontSize: 12, border: `1px solid ${cfg.color}38` }}>{STATUS_ICON_DISPLAY[st]}</span>
+                                  : <span style={{ display: "inline-block", width: 24, height: 24, borderRadius: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }} />}
+                              </td>
+                            );
+                          };
+                          if (!apoio) {
+                            const pct = sm.geral?.pct;
+                            return (
+                              <tr key={emp.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: rowBg }}>
+                                <td style={{ padding: "8px 14px", whiteSpace: "nowrap" }}>{avatar}</td>
+                                {reportDates.map(d => cell(getRecordValue(recordKey(d, emp.id)), d === getTodayStr()))}
+                                <td style={{ padding: "8px 14px", textAlign: "center", whiteSpace: "nowrap" }}>
+                                  {pct !== null ? <span style={{ fontWeight: 800, color: pct >= 75 ? "#22c55e" : pct >= 50 ? "#f59e0b" : "#ef4444" }}>{pct}%</span> : <span style={{ color: "#334155" }}>—</span>}
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return TURNOS.map((turno, ti) => {
+                            const td = sm[turno];
+                            return (
+                              <tr key={`${emp.id}_${turno}`} style={{ borderBottom: ti === 1 ? "1px solid rgba(255,255,255,0.04)" : "none", background: rowBg }}>
+                                <td style={{ padding: ti === 0 ? "7px 14px 2px" : "2px 14px 7px", whiteSpace: "nowrap" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    {ti === 0
+                                      ? <div style={{ width: 26, height: 26, borderRadius: "50%", background: avatarColor(emp.id), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: "bold" }}>{getInitials(emp.name)}</div>
+                                      : <div style={{ width: 26 }} />}
+                                    <div>
+                                      {ti === 0 && <div style={{ color: "#e2e8f0", fontWeight: 600, fontSize: 12 }}>{emp.name}</div>}
+                                      <div style={{ color: TURNO_COLOR[turno], fontSize: 10, fontWeight: 600 }}>{TURNO_LABEL[turno]}</div>
+                                    </div>
+                                  </div>
+                                </td>
+                                {reportDates.map(d => cell(getRecordValue(recordKey(d, emp.id, turno)), d === getTodayStr()))}
+                                <td style={{ padding: "6px 14px", textAlign: "center" }}>
+                                  {td.pct !== null ? <span style={{ fontWeight: 700, color: td.pct >= 75 ? "#22c55e" : td.pct >= 50 ? "#f59e0b" : "#ef4444" }}>{td.pct}%</span> : <span style={{ color: "#334155" }}>—</span>}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          );
+        })()}
 
         {/* ══════════ CADASTRO ══════════ */}
         {tab === "cadastro" && (
