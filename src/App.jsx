@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
+import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, orderBy, addDoc } from "firebase/firestore";
 
 /* ─────────────────────────────────────────────
    FIREBASE CONFIG
@@ -298,7 +298,10 @@ const AVATAR_COLORS = [
   "linear-gradient(135deg,#a855f7,#ec4899)",
 ];
 const avatarColor = (id) => AVATAR_COLORS[id % AVATAR_COLORS.length];
-const recordKey   = (date, id, turno = null) => turno ? `${date}_${id}_${turno}` : `${date}_${id}`;
+const recordKey    = (date, id, turno = null) => turno ? `${date}_${id}_${turno}` : `${date}_${id}`;
+const genId        = () => crypto.randomUUID();
+const monthKey     = (date) => date.substring(0, 7); // "YYYY-MM-DD" → "YYYY-MM"
+const currentMonth = () => new Date().toISOString().substring(0, 7);
 
 /* ─────────────────────────────────────────────
    WHATSAPP MESSAGE BUILDER
@@ -467,7 +470,6 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
     setPubError("");
     const emp = employees.find(e => e.id === Number(pubForm.empId));
     const nova = {
-      id: Date.now(),
       empId: Number(pubForm.empId),
       nomeManual: emp ? emp.name : "",
       cargo: emp ? emp.role : "",
@@ -477,7 +479,7 @@ function PublicJustForm({ employees, justificativas, saveJustificativas }) {
       status: "pendente",
       criadoEm: new Date().toISOString(),
     };
-    saveJustificativas([...justificativas, nova]);
+    addJustificativa(nova);
     recordPubSubmission();
     setPubSent(true);
     setPubForm({ empId: "", datas: "", motivo: "", documento: "" });
@@ -614,8 +616,11 @@ export default function App() {
   const [tab, setTab]               = useState("registro");
   const [school, setSchool]         = useState(DEFAULT_SCHOOL);
   const [employees, setEmployees]   = useState(DEFAULT_EMPLOYEES);
-  const [records, setRecords]       = useState({});
+  const [records, setRecords]       = useState({}); // { "YYYY-MM": { key: status, ... } }
+  const [loadedMonths, setLoadedMonths] = useState(new Set()); // which months have Firebase listeners
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
+  // Subscribe to selected date's month whenever it changes
+  useEffect(() => { subscribeToMonth(selectedDate.substring(0, 7)); }, [selectedDate]); // eslint-disable-line
   const [reportType, setReportType] = useState("semanal");
   const [saved, setSaved]           = useState(false);
   const [pdfLoading, setPdfLoading]   = useState(false);
@@ -666,23 +671,21 @@ export default function App() {
     const unsubEmps = onSnapshot(doc(db, "config", "employees"), (snap) => {
       if (snap.exists()) setEmployees(snap.data().list || []);
     });
-    // Registros
-    const unsubRecs = onSnapshot(doc(db, "config", "records"), (snap) => {
-      if (snap.exists()) setRecords(snap.data().data || {});
-    });
+    // Registros — listener setup handled by subscribeToMonth() below
     // Credenciais
     const unsubCreds = onSnapshot(doc(db, "config", "credentials"), (snap) => {
       if (snap.exists()) setCredentials(snap.data());
     });
-    // Justificativas
-    const unsubJust = onSnapshot(doc(db, "config", "justificativas"), (snap) => {
-      if (snap.exists()) setJustificativas(snap.data().list || []);
+    // Justificativas — subcoleção individual para crescimento ilimitado
+    const justQuery = query(collection(db, "justificativas"), orderBy("criadoEm", "desc"));
+    const unsubJust = onSnapshot(justQuery, (snap) => {
+      setJustificativas(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     // System Users
     const unsubUsers = onSnapshot(doc(db, "config", "systemUsers"), (snap) => {
       if (snap.exists()) setSystemUsers(snap.data().list || []);
     });
-    return () => { unsubSchool(); unsubEmps(); unsubRecs(); unsubCreds(); unsubJust(); unsubUsers(); };
+    return () => { unsubSchool(); unsubEmps(); unsubCreds(); unsubJust(); unsubUsers(); };
   }, []);
 
   const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          } catch(e) { console.error("erro escola:", e); } };
@@ -714,14 +717,117 @@ export default function App() {
   };
   const saveCreds     = async (c) => { setCredentials(c); try { await setDoc(doc(db, "config", "credentials"), c); } catch(e) { console.error("erro creds:", e); } };
 
-  const saveJustificativas = async (list) => {
-    setJustificativas(list);
-    try { await setDoc(doc(db, "config", "justificativas"), { list }); } catch(e) { console.error("erro just:", e); }
+  // Add a new justificativa document
+  const addJustificativa = async (nova) => {
+    try {
+      const ref = await addDoc(collection(db, "justificativas"), nova);
+      // onSnapshot will update state automatically
+      return ref.id;
+    } catch(e) { console.error("erro addJust:", e); }
+  };
+
+  // Update a single justificativa field(s)
+  const updateJustificativa = async (id, patch) => {
+    setJustificativas(prev => prev.map(j => j.id === id ? { ...j, ...patch } : j));
+    try { await updateDoc(doc(db, "justificativas", id), patch); }
+    catch(e) { console.error("erro updateJust:", e); }
+  };
+
+  // Delete a single justificativa
+  const removeJustificativaDoc = async (id) => {
+    setJustificativas(prev => prev.filter(j => j.id !== id));
+    try { await deleteDoc(doc(db, "justificativas", id)); }
+    catch(e) { console.error("erro deleteJust:", e); }
   };
 
   const saveSystemUsers = async (list) => {
     setSystemUsers(list);
     try { await setDoc(doc(db, "config", "systemUsers"), { list }); } catch(e) { console.error("erro users:", e); }
+  };
+
+  /* ── Records por mês ── */
+  const monthUnsubscribers = useRef({});
+
+  const subscribeToMonth = (month) => {
+    if (monthUnsubscribers.current[month]) return; // already subscribed
+    const unsub = onSnapshot(doc(db, "records", month), (snap) => {
+      setRecords(prev => ({ ...prev, [month]: snap.exists() ? (snap.data().data || {}) : {} }));
+    });
+    monthUnsubscribers.current[month] = unsub;
+    setLoadedMonths(prev => new Set([...prev, month]));
+  };
+
+  // Subscribe to current month on mount + cleanup on unmount
+  useEffect(() => {
+    const m = currentMonth();
+    subscribeToMonth(m);
+    return () => {
+      Object.values(monthUnsubscribers.current).forEach(fn => fn());
+      monthUnsubscribers.current = {};
+    };
+  }, []); // eslint-disable-line
+
+  // Get the flat record value for a given key (key includes date)
+  const getRecordValue = (key) => {
+    const month = key.substring(0, 7);
+    return records[month]?.[key] || null;
+  };
+
+  // Save a single record atomically to the correct month document
+  const setRecordAtomic2 = async (key, value) => {
+    const month = key.substring(0, 7);
+    subscribeToMonth(month); // ensure we're listening
+    setRecords(prev => ({ ...prev, [month]: { ...(prev[month] || {}), [key]: value } }));
+    try {
+      await updateDoc(doc(db, "records", month), { [`data.${key}`]: value });
+    } catch {
+      try { await setDoc(doc(db, "records", month), { data: { ...(records[month] || {}), [key]: value } }); }
+      catch(e2) { console.error("erro setRecordAtomic2:", e2); }
+    }
+  };
+
+  // Save multiple records atomically (used when approving justificativas)
+  const setRecordsAtomic2 = async (keysObj) => {
+    // Group keys by month
+    const byMonth = {};
+    Object.entries(keysObj).forEach(([k, v]) => {
+      const m = k.substring(0, 7);
+      if (!byMonth[m]) byMonth[m] = {};
+      byMonth[m][k] = v;
+    });
+    // Update state and Firestore for each month
+    setRecords(prev => {
+      const next = { ...prev };
+      Object.entries(byMonth).forEach(([m, keys]) => { next[m] = { ...(prev[m] || {}), ...keys }; });
+      return next;
+    });
+    for (const [month, keys] of Object.entries(byMonth)) {
+      subscribeToMonth(month);
+      const patch = Object.fromEntries(Object.entries(keys).map(([k, v]) => [`data.${k}`, v]));
+      try {
+        await updateDoc(doc(db, "records", month), patch);
+      } catch {
+        try { await setDoc(doc(db, "records", month), { data: { ...(records[month] || {}), ...keys } }); }
+        catch(e2) { console.error("erro setRecordsAtomic2:", e2); }
+      }
+    }
+  };
+
+  // Delete records for a specific employee (when removing employee)
+  const deleteEmployeeRecords = async (empId) => {
+    const updates = {};
+    for (const [month, monthData] of Object.entries(records)) {
+      const filtered = Object.fromEntries(
+        Object.entries(monthData).filter(([k]) => !k.includes(`_${empId}_`) && !k.endsWith(`_${empId}`))
+      );
+      if (Object.keys(filtered).length !== Object.keys(monthData).length) {
+        updates[month] = filtered;
+        try { await setDoc(doc(db, "records", month), { data: filtered }); } catch {}
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      setRecords(prev => ({ ...prev, ...updates }));
+    }
   };
 
   /* ── Helpers de permissão ── */
@@ -735,7 +841,6 @@ export default function App() {
     if (!justForm.motivo.trim()) { setJustError("Informe o motivo."); return; }
     setJustError("");
     const nova = {
-      id: Date.now(),
       empId: Number(justForm.empId),
       datas: justForm.datas.trim(),
       motivo: justForm.motivo.trim(),
@@ -743,15 +848,14 @@ export default function App() {
       status: "pendente",
       criadoEm: new Date().toISOString(),
     };
-    saveJustificativas([...justificativas, nova]);
+    addJustificativa(nova);
     setJustForm({ empId: "", datas: "", motivo: "", documento: "" });
     setShowJustModal(false);
     showToast("Justificativa registrada!");
   }
 
   function aprovarJustificativa(just) {
-    const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "aprovada" } : j);
-    saveJustificativas(updated);
+    updateJustificativa(just.id, { status: "aprovada" });
     const datas = just.datas.replace(/\n/g, ",").split(",").map(d => d.trim()).filter(Boolean);
     const emp = employees.find(e => e.id === just.empId);
     const keysToUpdate = {};
@@ -768,7 +872,7 @@ export default function App() {
         keysToUpdate[recordKey(dateKey, just.empId)] = "justificado";
       }
     });
-    setRecordsAtomic(keysToUpdate);
+    setRecordsAtomic2(keysToUpdate);
     showToast("Justificativa aprovada!");
     // Notificar via WhatsApp se tiver telefone
     if (emp && emp.phone) {
@@ -795,8 +899,7 @@ export default function App() {
 
   function confirmarReprovacao() {
     if (!reprovarTarget) return;
-    const updated = justificativas.map(j => j.id === reprovarTarget.id ? { ...j, status: "reprovada", motivoReprovacao: reprovarMotivo.trim() } : j);
-    saveJustificativas(updated);
+    updateJustificativa(reprovarTarget.id, { status: "reprovada", motivoReprovacao: reprovarMotivo.trim() });
     showToast("Justificativa reprovada.");
     // Notificar via WhatsApp se tiver telefone
     const emp = employees.find(e => e.id === reprovarTarget.empId);
@@ -825,7 +928,7 @@ export default function App() {
   }
 
   function removerJustificativa(id) {
-    saveJustificativas(justificativas.filter(j => j.id !== id));
+    removeJustificativaDoc(id);
     showToast("Justificativa removida.");
   }
 
@@ -939,7 +1042,7 @@ export default function App() {
       saveEmployees(employees.map(e => e.id === editingEmp.id ? { ...e, ...form } : e));
       showToast("Funcionário atualizado!");
     } else {
-      saveEmployees([...employees, { id: Date.now(), ...form }]);
+      saveEmployees([...employees, { id: genId(), ...form }]);
       showToast("Funcionário cadastrado!");
     }
     setShowForm(false);
@@ -947,7 +1050,7 @@ export default function App() {
 
   function handleDelete(id) {
     saveEmployees(employees.filter(e => e.id !== id));
-    saveRecords(Object.fromEntries(Object.entries(records).filter(([k]) => !k.includes(`_${id}_`) && !k.endsWith(`_${id}`))));
+    deleteEmployeeRecords(id);
     setDeleteConfirm(null);
     showToast("Funcionário removido.");
   }
@@ -955,8 +1058,8 @@ export default function App() {
   const toggleActive = (id) => saveEmployees(employees.map(e => e.id === id ? { ...e, active: !e.active } : e));
 
   /* ── Registro ── */
-  const setStatus   = (empId, status, turno = null) => setRecordAtomic(recordKey(selectedDate, empId, turno), status);
-  const getStatus   = (empId, date = selectedDate, turno = null) => records[recordKey(date, empId, turno)] || null;
+  const setStatus   = (empId, status, turno = null) => setRecordAtomic2(recordKey(selectedDate, empId, turno), status);
+  const getStatus   = (empId, date = selectedDate, turno = null) => getRecordValue(recordKey(date, empId, turno));
   const apoioFilled = (empId, date = selectedDate) => TURNOS.every(t => !!getStatus(empId, date, t));
 
   /* ── WhatsApp ── */
@@ -989,6 +1092,11 @@ export default function App() {
                         + activeApoio.reduce((a, e) => a + TURNOS.filter(t => getStatus(e.id, selectedDate, t)).length, 0);
 
   const reportDates = reportType === "semanal" ? getWeekDates() : getMonthDates();
+  // Subscribe to all months needed for current report view
+  useEffect(() => {
+    const months = [...new Set(reportDates.map(d => d.substring(0, 7)))];
+    months.forEach(subscribeToMonth);
+  }, [reportType, reportDates.join(",")]); // eslint-disable-line
   const today       = new Date();
   const monthName   = today.toLocaleString("pt-BR", { month: "long", year: "numeric" });
   const filteredCad = employees.filter(e =>
@@ -1665,7 +1773,7 @@ export default function App() {
                             <button onClick={() => reprovarJustificativa(just)} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)", color: "#ef4444", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>❌ Reprovar{emp?.phone ? " + 📲" : ""}</button>
                           </>)}
                           {just.status !== "pendente" && (
-                            <button onClick={() => { const updated = justificativas.map(j => j.id === just.id ? { ...j, status: "pendente" } : j); saveJustificativas(updated); showToast("Reaberta para análise."); }} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>↩ Reabrir</button>
+                            <button onClick={() => { updateJustificativa(just.id, { status: "pendente" }); showToast("Reaberta para análise."); }} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>↩ Reabrir</button>
                           )}
                           <button onClick={() => removerJustificativa(just.id)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(100,116,139,0.1)", color: "#64748b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700 }}>🗑️</button>
                         </div>
@@ -2052,7 +2160,7 @@ export default function App() {
                             saveSystemUsers(updated);
                             showToast("Usuário atualizado!");
                           } else {
-                            saveSystemUsers([...systemUsers, { id: Date.now(), name: userForm.name.trim(), user: userForm.user.trim(), pass: passHash, role: userForm.role, permissions: userForm.permissions }]);
+                            saveSystemUsers([...systemUsers, { id: genId(), name: userForm.name.trim(), user: userForm.user.trim(), pass: passHash, role: userForm.role, permissions: userForm.permissions }]);
                             showToast("Usuário criado!");
                           }
                           setShowUserModal(false);
