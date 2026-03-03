@@ -525,7 +525,14 @@ function PublicJustForm({ employees, justificativas, addJustificativa }) {
 
       <div>
         <label style={labelStyle}>Data(s) da Ausência <span style={{ color: "#ef4444" }}>*</span></label>
-        <input type="text" value={pubForm.datas} onChange={e => setPubForm(f => ({ ...f, datas: e.target.value }))} placeholder="Ex: 28/02/2026 ou 28/02, 01/03/2026" style={inputStyle} />
+        <input
+          type="date"
+          value={pubForm.datas}
+          onChange={e => setPubForm(f => ({ ...f, datas: e.target.value }))}
+          max={new Date().toISOString().split("T")[0]}
+          style={{ ...inputStyle, colorScheme: "dark", cursor: "pointer" }}
+        />
+        <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Para múltiplas datas, envie uma justificativa por data</div>
       </div>
 
       <div>
@@ -632,6 +639,7 @@ export default function App() {
   const [showReprovarModal, setShowReprovarModal] = useState(false);
   const [reprovarTarget, setReprovarTarget]       = useState(null);
   const [reprovarMotivo, setReprovarMotivo]       = useState("");
+  const [deleteJustConfirm, setDeleteJustConfirm] = useState(null); // just.id
 
   // Cadastro
   const [showForm, setShowForm]         = useState(false);
@@ -654,6 +662,7 @@ export default function App() {
 
   // Toast
   const [toast, setToast] = useState({ msg: "", type: "ok" });
+  const [dataLoaded, setDataLoaded] = useState(false); // true after Firebase sends first snapshot
   const showToast = (msg, type = "ok") => {
     setToast({ msg, type });
     setTimeout(() => setToast({ msg: "", type: "ok" }), 3000);
@@ -670,9 +679,10 @@ export default function App() {
       if (snap.exists()) setEmployees(snap.data().list || []);
     });
     // Registros — listener setup handled by subscribeToMonth() below
-    // Credenciais
+    // Credenciais — mark data as loaded once this arrives (needed for correct permission checks)
     const unsubCreds = onSnapshot(doc(db, "config", "credentials"), (snap) => {
       if (snap.exists()) setCredentials(snap.data());
+      setDataLoaded(true);
     });
     // Justificativas — subcoleção individual para crescimento ilimitado
     const justQuery = query(collection(db, "justificativas"), orderBy("criadoEm", "desc"));
@@ -832,24 +842,19 @@ export default function App() {
   }
 
   function aprovarJustificativa(just) {
-    updateJustificativa(just.id, { status: "aprovada" });
-    const datas = just.datas.replace(/\n/g, ",").split(",").map(d => d.trim()).filter(Boolean);
+    updateJustificativa(just.id, { status: "aprovada", aprovadoPor: currentUser?.name || "Gestor", aprovadoEm: new Date().toISOString() });
+    // Dates are now always in YYYY-MM-DD format (date picker enforces this)
+    const datas = just.datas.split(",").map(d => d.trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
     const emp = employees.find(e => e.id === just.empId);
     const keysToUpdate = {};
-    datas.forEach(dataStr => {
-      let dateKey = "";
-      if (dataStr.includes("/")) {
-        const parts = dataStr.split("/");
-        if (parts.length === 3) dateKey = `${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;
-      } else { dateKey = dataStr; }
-      if (!dateKey) return;
+    datas.forEach(dateKey => {
       if (emp && IS_APOIO(emp.role)) {
         TURNOS.forEach(t => { keysToUpdate[recordKey(dateKey, just.empId, t)] = "justificado"; });
       } else {
         keysToUpdate[recordKey(dateKey, just.empId)] = "justificado";
       }
     });
-    setRecordsAtomic2(keysToUpdate);
+    if (Object.keys(keysToUpdate).length > 0) setRecordsAtomic2(keysToUpdate);
     showToast("Justificativa aprovada!");
     // Notificar via WhatsApp se tiver telefone
     if (emp && emp.phone) {
@@ -876,7 +881,7 @@ export default function App() {
 
   function confirmarReprovacao() {
     if (!reprovarTarget) return;
-    updateJustificativa(reprovarTarget.id, { status: "reprovada", motivoReprovacao: reprovarMotivo.trim() });
+    updateJustificativa(reprovarTarget.id, { status: "reprovada", motivoReprovacao: reprovarMotivo.trim(), reprovadoPor: currentUser?.name || "Gestor", reprovadoEm: new Date().toISOString() });
     showToast("Justificativa reprovada.");
     // Notificar via WhatsApp se tiver telefone
     const emp = employees.find(e => e.id === reprovarTarget.empId);
@@ -1131,6 +1136,17 @@ export default function App() {
   /* ══════════════════════════════════════════
      RENDER
   ══════════════════════════════════════════ */
+  /* ── Loading enquanto Firebase carrega ── */
+  if (authed && !dataLoaded) {
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a,#1e293b)", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, fontFamily: "sans-serif", color: "#f1f5f9" }}>
+        <div style={{ width: 48, height: 48, border: "4px solid rgba(99,102,241,0.2)", borderTop: "4px solid #6366f1", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ fontSize: 14, color: "#94a3b8" }}>Carregando...</div>
+      </div>
+    );
+  }
+
   /* ── Tela de Login ── */
   if (!authed) {
     // Página pública: login + formulário de justificativa
@@ -1741,6 +1757,14 @@ export default function App() {
                             <span style={{ color: "#f87171", fontWeight: 600 }}>❌ Reprovado</span>
                             <span style={{ color: "#fca5a5" }}>{just.motivoReprovacao}</span>
                           </>)}
+                          {just.aprovadoPor && (<>
+                            <span style={{ color: "#64748b", fontWeight: 600 }}>👤 Aprovado por</span>
+                            <span style={{ color: "#86efac", fontSize: 12 }}>{just.aprovadoPor} · {new Date(just.aprovadoEm).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}</span>
+                          </>)}
+                          {just.reprovadoPor && (<>
+                            <span style={{ color: "#64748b", fontWeight: 600 }}>👤 Reprovado por</span>
+                            <span style={{ color: "#fca5a5", fontSize: 12 }}>{just.reprovadoPor} · {new Date(just.reprovadoEm).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}</span>
+                          </>)}
                         </div>
 
                         {/* Rodapé: ações */}
@@ -1752,7 +1776,7 @@ export default function App() {
                           {just.status !== "pendente" && (
                             <button onClick={() => { updateJustificativa(just.id, { status: "pendente" }); showToast("Reaberta para análise."); }} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700, whiteSpace: "nowrap" }}>↩ Reabrir</button>
                           )}
-                          <button onClick={() => removerJustificativa(just.id)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(100,116,139,0.1)", color: "#64748b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700 }}>🗑️</button>
+                          <button onClick={() => setDeleteJustConfirm(just.id)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: "rgba(100,116,139,0.1)", color: "#64748b", fontSize: 12, fontFamily: "sans-serif", fontWeight: 700 }}>🗑️</button>
                         </div>
                       </div>
                     );
@@ -1779,7 +1803,7 @@ export default function App() {
                     </div>
                     <div>
                       <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Data(s) da Ausência *</label>
-                      <input type="text" value={justForm.datas} onChange={e => setJustForm(f => ({ ...f, datas: e.target.value }))} placeholder="Ex: 28/02/2026 ou 28/02, 01/03/2026" style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none" }} />
+                      <input type="date" value={justForm.datas} onChange={e => setJustForm(f => ({ ...f, datas: e.target.value }))} max={new Date().toISOString().split("T")[0]} style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "11px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", colorScheme: "dark", cursor: "pointer" }} />
                       <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Para múltiplas datas, separe por vírgula</div>
                     </div>
                     <div>
@@ -2151,6 +2175,22 @@ export default function App() {
                 </div>
               </div>
             )}
+
+          {/* Modal Confirmar Exclusão de Justificativa */}
+          {deleteJustConfirm && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+              <div onClick={() => setDeleteJustConfirm(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }} />
+              <div style={{ position: "relative", background: "#1a2640", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 16, padding: "28px 24px", maxWidth: 380, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
+                <div style={{ fontSize: 36, textAlign: "center", marginBottom: 12 }}>🗑️</div>
+                <div style={{ fontSize: 16, fontWeight: 700, textAlign: "center", marginBottom: 8, fontFamily: "sans-serif" }}>Excluir justificativa?</div>
+                <div style={{ fontSize: 13, color: "#94a3b8", textAlign: "center", marginBottom: 24, fontFamily: "sans-serif" }}>Essa ação não pode ser desfeita.</div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={() => setDeleteJustConfirm(null)} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "sans-serif" }}>Cancelar</button>
+                  <button onClick={() => { removerJustificativa(deleteJustConfirm); setDeleteJustConfirm(null); }} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#ef4444,#dc2626)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "sans-serif" }}>Excluir</button>
+                </div>
+              </div>
+            </div>
+          )}
           </div>
         )}
 
