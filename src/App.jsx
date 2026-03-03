@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, updateDoc, onSnapshot, collection } from "firebase/firestore";
+import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
 
 /* ─────────────────────────────────────────────
    FIREBASE CONFIG
@@ -15,6 +15,28 @@ const firebaseConfig = {
 };
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
+
+/* ─────────────────────────────────────────────
+   SEGURANÇA — Hash de senha (SHA-256 nativo)
+───────────────────────────────────────────── */
+async function hashPassword(plain) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function isHashed(str) {
+  // SHA-256 hashes are always 64 hex chars
+  return typeof str === "string" && /^[a-f0-9]{64}$/.test(str);
+}
+
+async function generateSessionToken() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array).map(b => b.toString(16).padStart(2, "0")).join("");
+}
 
 /* ─────────────────────────────────────────────
    EXPORTAR PDF (jsPDF + autotable via CDN)
@@ -494,6 +516,17 @@ export default function App() {
   const [authed, setAuthed] = useState(() => {
     try { return sessionStorage.getItem("freqschool_authed") === "1"; } catch { return false; }
   });
+  const [sessionToken, setSessionTokenState] = useState(() => {
+    try { return sessionStorage.getItem("freqschool_token") || null; } catch { return null; }
+  });
+
+  const setSessionToken = (token) => {
+    setSessionTokenState(token);
+    try {
+      if (token) sessionStorage.setItem("freqschool_token", token);
+      else sessionStorage.removeItem("freqschool_token");
+    } catch {}
+  };
   const [currentUser, setCurrentUserState] = useState(() => {
     try { const s = sessionStorage.getItem("freqschool_user"); return s ? JSON.parse(s) : null; } catch { return null; }
   });
@@ -757,38 +790,63 @@ export default function App() {
   }
 
   /* ── Login ── */
-  function handleLogin() {
+  async function handleLogin() {
     setLoginLoading(true);
     setLoginError("");
-    setTimeout(() => {
-      // Check gestor (master)
-      if (loginUser.trim() === credentials.user && loginPass === credentials.pass) {
-        setCurrentUser({ user: credentials.user, role: "Gestor", name: "Gestor", permissions: { registro: true, relatorio: true, justificativas: true, cadastro: true, escola: true } });
-        setAuthedPersisted(true);
-        setShowLoginForm(false);
-        setLoginError("");
-        setLoginLoading(false);
-        return;
+    const inputHash = await hashPassword(loginPass);
+
+    // Check gestor (master)
+    const gestorPassOk = isHashed(credentials.pass)
+      ? credentials.pass === inputHash          // already hashed
+      : credentials.pass === loginPass;         // plain-text (migrates below)
+
+    if (loginUser.trim() === credentials.user && gestorPassOk) {
+      // Migrate plain-text gestor password to hash on first login
+      if (!isHashed(credentials.pass)) {
+        saveCreds({ user: credentials.user, pass: inputHash });
       }
-      // Check system users
-      const found = systemUsers.find(u => u.user.toLowerCase() === loginUser.trim().toLowerCase() && u.pass === loginPass);
-      if (found) {
-        setCurrentUser(found);
-        setAuthedPersisted(true);
-        setShowLoginForm(false);
-        setLoginError("");
-      } else {
-        setLoginError("Usuário ou senha incorretos.");
-      }
+      const gestorToken = await generateSessionToken();
+      setSessionToken(gestorToken);
+      try { await setDoc(doc(db, "sessions", gestorToken), { role: "Gestor", user: credentials.user, createdAt: new Date().toISOString() }); } catch {}
+      setCurrentUser({ user: credentials.user, role: "Gestor", name: "Gestor", permissions: { registro: true, relatorio: true, justificativas: true, cadastro: true, escola: true } });
+      setAuthedPersisted(true);
+      setShowLoginForm(false);
+      setLoginError("");
       setLoginLoading(false);
-    }, 600);
+      return;
+    }
+
+    // Check system users
+    const found = systemUsers.find(u => {
+      if (u.user.toLowerCase() !== loginUser.trim().toLowerCase()) return false;
+      return isHashed(u.pass) ? u.pass === inputHash : u.pass === loginPass;
+    });
+
+    if (found) {
+      // Migrate plain-text sub-user password to hash on first login
+      if (!isHashed(found.pass)) {
+        const migrated = systemUsers.map(u => u.id === found.id ? { ...u, pass: inputHash } : u);
+        saveSystemUsers(migrated);
+      }
+      const userToken = await generateSessionToken();
+      setSessionToken(userToken);
+      try { await setDoc(doc(db, "sessions", userToken), { role: found.role, user: found.user, createdAt: new Date().toISOString() }); } catch {}
+      setCurrentUser(found);
+      setAuthedPersisted(true);
+      setShowLoginForm(false);
+      setLoginError("");
+    } else {
+      setLoginError("Usuário ou senha incorretos.");
+    }
+    setLoginLoading(false);
   }
 
-  function handleChangeCreds() {
+  async function handleChangeCreds() {
     if (!newUser.trim()) { setLoginError("Informe o novo usuário."); return; }
     if (newPass.length < 6) { setLoginError("A senha deve ter pelo menos 6 caracteres."); return; }
     if (newPass !== newPass2) { setLoginError("As senhas não coincidem."); return; }
-    saveCreds({ user: newUser.trim(), pass: newPass });
+    const hashed = await hashPassword(newPass);
+    saveCreds({ user: newUser.trim(), pass: hashed });
     setShowChangeCreds(false);
     setNewUser(""); setNewPass(""); setNewPass2("");
     showToast("Credenciais atualizadas!");
@@ -1038,7 +1096,7 @@ export default function App() {
               🔑 Alterar Senha
             </button>
           )}
-          <button onClick={() => { setAuthedPersisted(false); setCurrentUser(null); setShowLoginForm(false); setLoginUser(""); setLoginPass(""); }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={() => { (() => { if (sessionToken) { deleteDoc(doc(db, "sessions", sessionToken)).catch(() => {}); setSessionToken(null); } setAuthedPersisted(false); setCurrentUser(null); setShowLoginForm(false); setLoginUser(""); setLoginPass(""); })() }} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)", color: "#f87171", fontFamily: "sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
             🚪 Sair
           </button>
         </div>
@@ -1917,15 +1975,20 @@ export default function App() {
                         if (conflict) { setUserFormError("Esse usuário de login já existe."); return; }
                         if (userForm.user.trim().toLowerCase() === credentials.user.toLowerCase()) { setUserFormError("Esse usuário já pertence ao Gestor."); return; }
                         setUserFormError("");
-                        if (editingUser) {
-                          const updated = systemUsers.map(u => u.id === editingUser.id ? { ...u, name: userForm.name.trim(), user: userForm.user.trim(), role: userForm.role, permissions: userForm.permissions, ...(userForm.pass ? { pass: userForm.pass } : {}) } : u);
-                          saveSystemUsers(updated);
-                          showToast("Usuário atualizado!");
-                        } else {
-                          saveSystemUsers([...systemUsers, { id: Date.now(), name: userForm.name.trim(), user: userForm.user.trim(), pass: userForm.pass, role: userForm.role, permissions: userForm.permissions }]);
-                          showToast("Usuário criado!");
-                        }
-                        setShowUserModal(false);
+                        // Hash password before saving
+                        const saveUser = async () => {
+                          const passHash = userForm.pass ? await hashPassword(userForm.pass) : null;
+                          if (editingUser) {
+                            const updated = systemUsers.map(u => u.id === editingUser.id ? { ...u, name: userForm.name.trim(), user: userForm.user.trim(), role: userForm.role, permissions: userForm.permissions, ...(passHash ? { pass: passHash } : {}) } : u);
+                            saveSystemUsers(updated);
+                            showToast("Usuário atualizado!");
+                          } else {
+                            saveSystemUsers([...systemUsers, { id: Date.now(), name: userForm.name.trim(), user: userForm.user.trim(), pass: passHash, role: userForm.role, permissions: userForm.permissions }]);
+                            showToast("Usuário criado!");
+                          }
+                          setShowUserModal(false);
+                        };
+                        saveUser();
                       }} style={{ flex: 2, padding: "11px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 15px rgba(99,102,241,0.4)" }}>
                         {editingUser ? "💾 Salvar Alterações" : "✓ Criar Usuário"}
                       </button>

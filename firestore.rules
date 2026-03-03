@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────
+    // Verifica se existe uma sessão ativa válida para o token fornecido
+    function hasValidSession(token) {
+      return token != null
+        && exists(/databases/$(database)/documents/sessions/$(token))
+        && get(/databases/$(database)/documents/sessions/$(token)).data.keys().hasAny(['role']);
+    }
+
+    // Verifica se a sessão pertence ao perfil Gestor
+    function isGestor(token) {
+      return hasValidSession(token)
+        && get(/databases/$(database)/documents/sessions/$(token)).data.role == "Gestor";
+    }
+
+    // ── Sessões ──────────────────────────────────────────
+    // Qualquer um pode criar uma sessão (necessário para o login funcionar)
+    // Apenas o próprio dono pode ler ou deletar a sua sessão
+    match /sessions/{tokenId} {
+      allow create: if true;
+      allow read, delete: if request.auth == null; // leitura livre pois token é o próprio ID
+      allow update: if false; // sessões são imutáveis
+    }
+
+    // ── Config: credenciais do gestor ────────────────────
+    // Apenas Gestor pode ler e escrever
+    match /config/credentials {
+      allow read, write: if isGestor(request.headers["x-session-token"]);
+    }
+
+    // ── Config: usuários do sistema ──────────────────────
+    // Apenas Gestor pode ler e escrever
+    match /config/systemUsers {
+      allow read, write: if isGestor(request.headers["x-session-token"]);
+    }
+
+    // ── Config: dados da escola ──────────────────────────
+    // Leitura livre (necessário para a tela pública de justificativa)
+    // Escrita exige sessão válida
+    match /config/school {
+      allow read: if true;
+      allow write: if hasValidSession(request.headers["x-session-token"]);
+    }
+
+    // ── Config: funcionários ─────────────────────────────
+    // Leitura livre (tela pública precisa dos nomes para o formulário)
+    // Escrita exige sessão válida
+    match /config/employees {
+      allow read: if true;
+      allow write: if hasValidSession(request.headers["x-session-token"]);
+    }
+
+    // ── Config: registros de frequência ──────────────────
+    // Apenas usuários autenticados podem ler e escrever
+    match /config/records {
+      allow read, write: if hasValidSession(request.headers["x-session-token"]);
+    }
+
+    // ── Config: justificativas ───────────────────────────
+    // Leitura e criação pública (formulário público envia justificativas)
+    // Atualização/deleção exige sessão (somente gestor/coordenador aprova)
+    match /config/justificativas {
+      allow read, create: if true;
+      allow update, delete: if hasValidSession(request.headers["x-session-token"]);
+    }
+
+    // ── Bloquear tudo mais ───────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
