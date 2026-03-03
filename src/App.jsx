@@ -447,7 +447,7 @@ function recordPubSubmission() {
   } catch {}
 }
 
-function PublicJustForm({ employees, justificativas, saveJustificativas }) {
+function PublicJustForm({ employees, justificativas, addJustificativa }) {
   const [pubForm, setPubForm] = useState({ empId: "", datas: "", motivo: "", documento: "" });
   const [pubError, setPubError] = useState("");
   const [pubSent, setPubSent] = useState(false);
@@ -619,8 +619,6 @@ export default function App() {
   const [records, setRecords]       = useState({}); // { "YYYY-MM": { key: status, ... } }
   const [loadedMonths, setLoadedMonths] = useState(new Set()); // which months have Firebase listeners
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
-  // Subscribe to selected date's month whenever it changes
-  useEffect(() => { subscribeToMonth(selectedDate.substring(0, 7)); }, [selectedDate]); // eslint-disable-line
   const [reportType, setReportType] = useState("semanal");
   const [saved, setSaved]           = useState(false);
   const [pdfLoading, setPdfLoading]   = useState(false);
@@ -690,31 +688,7 @@ export default function App() {
 
   const saveSchool    = async (s) => { setSchool(s);    try { await setDoc(doc(db, "config", "school"),    s);          } catch(e) { console.error("erro escola:", e); } };
   const saveEmployees = async (l) => { setEmployees(l); try { await setDoc(doc(db, "config", "employees"), { list: l }); } catch(e) { console.error("erro employees:", e); } };
-  const saveRecords   = async (r) => { setRecords(r);   try { await setDoc(doc(db, "config", "records"),   { data: r }); } catch(e) { console.error("erro records:", e); } };
-
-  // Atomic single-key write — prevents race conditions when two users mark attendance simultaneously
-  const setRecordAtomic = async (key, value) => {
-    setRecords(prev => ({ ...prev, [key]: value }));
-    try {
-      await updateDoc(doc(db, "config", "records"), { [`data.${key}`]: value });
-    } catch(e) {
-      // Document may not exist yet — fall back to setDoc
-      try { await setDoc(doc(db, "config", "records"), { data: { ...records, [key]: value } }); }
-      catch(e2) { console.error("erro setRecordAtomic:", e2); }
-    }
-  };
-
-  // Atomic multi-key write (for approve justificativa which changes several keys at once)
-  const setRecordsAtomic = async (keysObj) => {
-    setRecords(prev => ({ ...prev, ...keysObj }));
-    const patch = Object.fromEntries(Object.entries(keysObj).map(([k, v]) => [`data.${k}`, v]));
-    try {
-      await updateDoc(doc(db, "config", "records"), patch);
-    } catch(e) {
-      try { await setDoc(doc(db, "config", "records"), { data: { ...records, ...keysObj } }); }
-      catch(e2) { console.error("erro setRecordsAtomic:", e2); }
-    }
-  };
+  // Records now stored per-month — see setRecordAtomic2 / setRecordsAtomic2 below
   const saveCreds     = async (c) => { setCredentials(c); try { await setDoc(doc(db, "config", "credentials"), c); } catch(e) { console.error("erro creds:", e); } };
 
   // Add a new justificativa document
@@ -766,6 +740,9 @@ export default function App() {
       monthUnsubscribers.current = {};
     };
   }, []); // eslint-disable-line
+
+  // Subscribe to selected date's month whenever it changes
+  useEffect(() => { subscribeToMonth(selectedDate.substring(0, 7)); }, [selectedDate]); // eslint-disable-line
 
   // Get the flat record value for a given key (key includes date)
   const getRecordValue = (key) => {
@@ -1224,7 +1201,7 @@ export default function App() {
             </div>
 
             <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: "28px 26px", boxShadow: "0 15px 40px rgba(0,0,0,0.3)" }}>
-              <PublicJustForm employees={employees} justificativas={justificativas} saveJustificativas={saveJustificativas} />
+              <PublicJustForm employees={employees} justificativas={justificativas} addJustificativa={addJustificativa} />
             </div>
           </div>
         </div>
