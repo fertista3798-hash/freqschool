@@ -311,6 +311,15 @@ function buildWhatsAppMessage(emp, records, date, school) {
   const dateLabel = formatDate(date);
   const dayOfWeek = DAYS_PT[new Date(date + "T12:00:00").getDay()];
 
+  // records pode ser { "YYYY-MM": { chave: status } } ou já o mapa plano { chave: status }
+  // Normalizamos para sempre usar o mapa plano do mês correto
+  const month = date.substring(0, 7);
+  const flatRecords = (records && records[month] && typeof records[month] === "object")
+    ? records[month]
+    : records;
+
+  const getR = (key) => flatRecords[key] || null;
+
   let lines = [];
   lines.push(`📋 *${school.name || "FreqSchool"}* — ${dayOfWeek}, ${dateLabel}`);
   lines.push(`👤 ${emp.name} (${emp.role})`);
@@ -321,14 +330,14 @@ function buildWhatsAppMessage(emp, records, date, school) {
 
   if (apoio) {
     TURNOS.forEach(turno => {
-      const s   = records[recordKey(date, emp.id, turno)] || null;
+      const s   = getR(recordKey(date, emp.id, turno));
       const cfg = s ? STATUS_CONFIG[s] : null;
       const turnoLabel = turno === "manha" ? "Manhã" : "Tarde";
       lines.push(`${turnoLabel}: ${cfg ? `${cfg.icon} ${cfg.label}` : "➖ Não registrado"}`);
       if (s === "ausente") temFalta = true;
     });
   } else {
-    const s   = records[recordKey(date, emp.id)] || null;
+    const s   = getR(recordKey(date, emp.id));
     const cfg = s ? STATUS_CONFIG[s] : null;
     lines.push(`Frequência: ${cfg ? `${cfg.icon} ${cfg.label}` : "➖ Não registrado"}`);
     if (s === "ausente") temFalta = true;
