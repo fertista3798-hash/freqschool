@@ -1059,7 +1059,8 @@ export default function App() {
       showToast("Informe um número de WhatsApp válido.", "err");
       return;
     }
-    const message = buildWhatsAppMessage(waModal, records, selectedDate, school);
+    const monthRecords = records[selectedDate.substring(0, 7)] || {};
+    const message = buildWhatsAppMessage(waModal, monthRecords, selectedDate, school);
     sendWhatsApp(waPhone, message);
     setWaSent(true);
     // Salva o telefone no funcionário se ele não tinha
